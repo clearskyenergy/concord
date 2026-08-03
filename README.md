@@ -6,23 +6,14 @@ a new company focused on sales and energy projects.
 Four unlocked tools on a 14-day trial, with a one-line switch to convert to a
 paid Tier 1 account.
 
-> ## ⚠ Two placeholders to fill before this deploys
->
-> **1. The mail domain.** `orgId` and `allowedDomain` in `config.js` both say
-> `REPLACE_ME`. Set them to Concord's real domain — the same value in both.
->
-> Do **not** use `concordenergy.com`. That's a live domain belonging to an
-> unrelated Denver oil-and-gas trading firm (~57 staff, founded 2002), and
-> putting it in `allowedDomain` would let their employees sign into this
-> workspace. The guard at the bottom of `config.js` blocks the portal from
-> loading while the placeholder is in place, so a forgotten edit fails loudly
-> rather than quietly opening the door to the wrong company.
->
-> **2. The logo.** `/omega-logo.png` — the ClearSky-OMEGA mark — is standing in
-> for now. Swap both `logo` lines in `config.js` when Concord sends theirs.
-> Ask for a transparent PNG with a dark wordmark, around 600px wide: it renders
-> at 22px in the topbar and 88px on the sign-in card, both against white, so a
-> light or knocked-out logo will vanish.
+Mail domain: **`concordenergyusa.com`**. Note the `usa` — `concordenergy.com`
+is a live domain belonging to an unrelated Denver oil-and-gas trading firm, so
+don't shorten it. Both `orgId` and `allowedDomain` are set to the full form and
+must stay identical.
+
+Branding is Concord's own concentric-C mark (`concord-logo.png`), used for both
+the portal chrome and proposal exports. No placeholders remain — this repo is
+ready to deploy.
 
 ---
 
@@ -116,17 +107,32 @@ To harden expiry into an actual lockout, set `lockOnExpiry: true` inside the
 | `editor.html` | **shared** | BESS Site Map application |
 | `omega-brand.js` | **shared** | Tenant resolution + branding |
 | `config.js` | **tenant-specific** | The only file to edit |
-| `omega-logo.png` | platform asset | ClearSky-OMEGA mark — **also standing in as Concord's logo for now** |
+| `concord-logo.png` | tenant asset | Concord's concentric-C mark |
+| `omega-logo.png` | platform asset | ClearSky-OMEGA mark |
 
 The five shared files are byte-identical to the FENECON and iQGen deployments —
 verified by checksum before this repo was cut. Fixes belong upstream and get
 copied down; never patch them here, or this repo silently forks.
 
-**Interim branding.** `logo` and `exportBrand.logo` both point at
-`/omega-logo.png` until Concord's mark arrives. The portal will read as
-ClearSky-OMEGA-branded rather than Concord-branded in the meantime — fine for
-internal preview, worth swapping before any customer-facing proposal export goes
-out, since `exportBrand.logo` is what lands on the PDF.
+**About the logo file.** Built from the screenshot you supplied: white
+background keyed to transparent, trimmed to the mark, 5% margin, output at
+218x264.
+
+The source mark measured only 135x167px, so the file is already a 1.5x upscale.
+It's sized at 264px tall to cover the 88px sign-in card at 3x DPR, and pushing
+it larger would add blur rather than detail. If it reads soft on a retina
+screen, ask Concord for the vector original (SVG/AI/EPS) and re-export — that's
+the only real fix.
+
+One thing to know before anyone re-processes this file: the light grey in the
+outer arc is `#BEC4C3`, only about 106 units from white in RGB. A naive
+white-removal pass would eat most of that arc. The threshold used here was
+deliberately tight (keys out only pixels within ~8 units of pure white, with a
+feathered ramp to 26) to preserve it alongside `#6F7D7A` slate and `#E5AB4B`
+amber.
+
+The mark is a symbol with no wordmark, so `clientName` ("Concord Energy") does
+the naming work in the sidebar and on the sign-in card.
 
 ---
 
@@ -139,10 +145,9 @@ out, since `exportBrand.logo` is what lands on the PDF.
    both `concord.clearskyomega.com` **and** `concord.vercel.app`. Missing the
    raw Vercel URL is the failure mode where the page renders fine and Google
    sign-in errors out.
-3. **Firestore rules** — confirm `userOrg()` maps Concord's mail domain to the
-   matching org. If they end up on more than one domain, verify each variant,
-   the way FENECON needed.
-4. **Seed their projects** with the same `orgId` you set in `config.js`, or the
+3. **Firestore rules** — confirm `userOrg()` maps `@concordenergyusa.com` to the
+   `concordenergyusa.com` org.
+4. **Seed their projects** with `orgId: 'concordenergyusa.com'`, or the
    portal authenticates fine and shows an empty portfolio. A brand-new company
    may have nothing to import — in which case check that an empty portfolio
    still reads as a clean starting state rather than a loading failure.
@@ -161,10 +166,9 @@ cache the system flush doesn't touch.
 
 ## Access
 
-Set `orgId` and `allowedDomain` to Concord's real mail domain — identical values,
-since orgId is the tenant lock and allowedDomain is the sign-in filter. If they
-run more than one domain, uncomment `allowedDomains` and list the extras; they
-all land in the same workspace regardless.
+Sign-in is restricted to `@concordenergyusa.com`. If they add a second domain
+later, uncomment `allowedDomains` and list the extras — they all land in the
+same workspace, since `orgId` is fixed regardless of which address signs in.
 
 `csebuilders.com` and `clearsky-usa.com` may preview and survive expiry.
 

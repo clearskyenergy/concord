@@ -91,34 +91,35 @@ window.CLEARSKY_CONFIG = {
     type:          'developer',
     clientName:    'Concord Energy',
 
-    /* ⚠ SET THESE BEFORE DEPLOYING — both must be Concord's real mail domain.
-       They are deliberately left as placeholders rather than guessed: the
-       obvious guess, concordenergy.com, is a live domain belonging to an
-       unrelated Denver oil-and-gas trading firm, and shipping it here would
-       let their staff sign into this portal.
+    /* Note the domain: concordenergyUSA.com, NOT concordenergy.com — the
+       latter is a live domain belonging to an unrelated Denver oil-and-gas
+       trading firm. Don't "correct" this to the shorter form.
 
        orgId is the hard tenant lock that scopes ALL Firestore reads.
-       allowedDomain is who may sign in. Keep them identical.
-
-       The setup guard at the bottom of this file refuses to let the portal
-       load while these still say REPLACE_ME, so a forgotten edit fails loudly
-       instead of silently opening the workspace to the wrong company.        */
-    orgId:         'REPLACE_ME',
-    allowedDomain: 'REPLACE_ME',
+       allowedDomain is who may sign in. They must stay identical.            */
+    orgId:         'concordenergyusa.com',
+    allowedDomain: 'concordenergyusa.com',
 
     /* If Concord runs more than one mail domain, list the extras here — they
        all land in the same workspace, because orgId above is fixed regardless
        of which address signs in.                                             */
     // allowedDomains: [],
 
-    /* INTERIM — the ClearSky-OMEGA mark stands in until Concord sends theirs.
-       Swap this line and exportBrand.logo below to '/concord-logo.png' once
-       you have it; nothing else changes.
+    /* Concord's concentric-C mark. Derived from the supplied screenshot:
+       white background keyed out to transparent, trimmed to the mark, 5%
+       margin added, output 218x264.
 
-       What to ask them for: transparent PNG, dark wordmark, around 600px wide.
-       It renders at 22px in the topbar chip and 88px on the sign-in card, both
-       on white, so a light or knocked-out logo will disappear.               */
-    logo:          '/omega-logo.png',
+       Sized at 264px tall = 3x the 88px sign-in card render. The source mark
+       was only 135x167px, so this is already a 1.5x upscale — pushing it
+       larger would add blur, not detail. If it looks soft on a retina display,
+       ask Concord for the vector (SVG/AI/EPS) and re-export; the file here is
+       as good as a screenshot crop can get.
+
+       Brand colours preserved: #BEC4C3 grey, #6F7D7A slate, #E5AB4B amber.
+       The light grey is only ~106 units from white, so it survived the
+       background key by a deliberately tight threshold — worth knowing before
+       anyone re-processes this file with a naive white-removal.              */
+    logo:          '/concord-logo.png',
 
     /* ── PLAN-DRIVEN — do not edit these three by hand.
            Change PLAN at the top of the file instead. ── */
@@ -144,7 +145,7 @@ window.CLEARSKY_CONFIG = {
 
     /* Branding for customer-facing exports (proposals, PDFs). */
     exportBrand: {
-      logo:              '/omega-logo.png',   // interim — see note above
+      logo:              '/concord-logo.png',
       name:              'Concord Energy',
       poweredBy:         'Powered by ClearSky-OMEGA',
       platformCopyright: '© 2026 ClearSky Energy Solutions LLC · ClearSky-OMEGA platform'
