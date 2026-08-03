@@ -13,14 +13,14 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="author" content="Tommy Gilmer · ClearSky Energy Solutions LLC">
 <meta name="copyright" content="© 2025 ClearSky Energy Solutions LLC. Proprietary.">
-<title>NextNRG Sales Proposal Builder · ClearSky-OMEGA</title>
+<title>Sales Proposal Builder · ClearSky-OMEGA</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Inter',-apple-system,Arial,sans-serif;background:#F1F4F8;color:#1E2A38;min-height:100vh}
 :root{
   --bg:#F1F4F8;--surface:#FFFFFF;--panel:#F7F9FC;--card:#FFFFFF;
   --border:#E2E8F0;--border2:#CBD5E1;
-  --accent:#1D4ED8;--accent-dim:rgba(29,78,216,.08);      /* NextNRG blue, restrained */
+  --accent:#1D4ED8;--accent-dim:rgba(29,78,216,.08);      /* neutral default; overridden by applyBrand() */
   --green:#16A34A;--green-dim:rgba(22,163,74,.09);
   --amber:#B45309;--red:#DC2626;
   --text:#1E2A38;--sub:#64748B;--muted:#94A3B8;
@@ -228,7 +228,7 @@ body{font-family:'Inter',-apple-system,Arial,sans-serif;background:#F1F4F8;color
 <div class="hdr">
   <a href="/" id="hdr-back-link" class="hdr-back" onclick="return _goPortal(event)">← Portal</a>
   <div class="hdr-title">📄 SALES PROPOSAL BUILDER</div>
-  <div class="hdr-sub">NextNRG</div>
+  <div class="hdr-sub"></div>
 </div>
 
 <div class="main">
@@ -259,7 +259,7 @@ body{font-family:'Inter',-apple-system,Arial,sans-serif;background:#F1F4F8;color
     </div>
     <div class="field">
       <label>Agent Email / Phone</label>
-      <input type="text" id="agent-contact" placeholder="you@nextnrg.com · (000) 000-0000" oninput="update()">
+      <input type="text" id="agent-contact" placeholder="you@company.com · (000) 000-0000" oninput="update()">
     </div>
   </div>
 
@@ -269,7 +269,7 @@ body{font-family:'Inter',-apple-system,Arial,sans-serif;background:#F1F4F8;color
     <div class="model-grid">
       <div class="model-btn active" id="model-clearsky" onclick="setModel('clearsky')">
         <span class="model-btn-icon">🏢</span>
-        <div class="model-btn-label" id="model-btn-owns-label">NextNRG Owns</div>
+        <div class="model-btn-label" id="model-btn-owns-label">Developer Owns</div>
       </div>
       <div class="model-btn" id="model-finance" onclick="setModel('finance')">
         <span class="model-btn-icon">💳</span>
@@ -475,17 +475,17 @@ body{font-family:'Inter',-apple-system,Arial,sans-serif;background:#F1F4F8;color
     <div class="p1-accent"></div>
     <div class="p1-content">
       <div class="p1-logo-area">
-        <img class="brand-logo" src="/nextnrg-logo.png" style="width:52px;height:52px;object-fit:contain;border-radius:6px;background:#fff;padding:2px">
+        <img class="brand-logo" alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" onerror="_logoFallback(this)" style="width:52px;height:52px;object-fit:contain;border-radius:6px;background:#fff;padding:2px">
         <div>
-          <div class="p1-logo-text brand-name">NextNRG</div>
-          <div class="p1-logo-sub" id="p1-logo-sub">BATTERY ENERGY STORAGE · EV CHARGING · VPP</div>
+          <div class="p1-logo-text brand-name"></div>
+          <div class="p1-logo-sub" id="p1-logo-sub"></div>
         </div>
       </div>
 
       <div class="p1-hero">
         <div class="p1-eyebrow" id="p1-eyebrow">Clean Energy Proposal</div>
         <h1 class="p1-headline" id="p1-headline">Lower Power Bills.<br><span>Zero Upfront Cost.</span></h1>
-        <div class="p1-model-badge" id="p1-model-badge">🏢 NextNRG Ownership Model</div>
+        <div class="p1-model-badge" id="p1-model-badge"></div>
         <div class="p1-divider"></div>
         <div class="p1-meta">
           <div class="p1-meta-item">
@@ -537,8 +537,8 @@ body{font-family:'Inter',-apple-system,Arial,sans-serif;background:#F1F4F8;color
   <div class="page" id="page2">
     <div class="p2-header">
       <div class="p2-logo-small">
-        <img class="brand-logo" src="/nextnrg-logo.png" style="width:28px;height:28px;object-fit:contain;background:#fff;border-radius:4px;padding:1px">
-        <span class="brand-name">NextNRG</span>
+        <img class="brand-logo" alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" onerror="_logoFallback(this)" style="width:28px;height:28px;object-fit:contain;background:#fff;border-radius:4px;padding:1px">
+        <span class="brand-name"></span>
       </div>
       <div class="p2-page-title">SITE OVERVIEW &amp; AGREEMENT TERMS</div>
     </div>
@@ -580,8 +580,8 @@ body{font-family:'Inter',-apple-system,Arial,sans-serif;background:#F1F4F8;color
   <div class="page" id="page4">
     <div class="p3-header">
       <div class="p2-logo-small">
-        <img class="brand-logo" src="/nextnrg-logo.png" style="width:28px;height:28px;object-fit:contain;background:#fff;border-radius:4px;padding:1px">
-        <span class="brand-name">NextNRG</span>
+        <img class="brand-logo" alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" onerror="_logoFallback(this)" style="width:28px;height:28px;object-fit:contain;background:#fff;border-radius:4px;padding:1px">
+        <span class="brand-name"></span>
       </div>
       <div class="p2-page-title">MODEL OUTPUTS, GRAPHS &amp; KEY FIGURES</div>
     </div>
@@ -602,11 +602,11 @@ body{font-family:'Inter',-apple-system,Arial,sans-serif;background:#F1F4F8;color
     </div>
     <div class="p3-footer">
       <div class="p3-footer-logo">
-        <img class="brand-logo" src="/nextnrg-logo.png" style="width:28px;height:28px;object-fit:contain;background:#fff;border-radius:4px;padding:1px">
-        <span class="brand-name">NextNRG</span>
+        <img class="brand-logo brand-logo-white" alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" onerror="_logoFallback(this)" style="width:28px;height:28px;object-fit:contain;border-radius:4px;padding:1px">
+        <span class="brand-name"></span>
       </div>
       <div class="p3-footer-contact">
-        <span class="brand-name">NextNRG</span><br>
+        <span class="brand-name"></span><br>
         <span id="p4-agent-line"></span>
       </div>
     </div>
@@ -615,14 +615,14 @@ body{font-family:'Inter',-apple-system,Arial,sans-serif;background:#F1F4F8;color
   <div class="page" id="page3">
     <div class="p3-header">
       <div class="p2-logo-small">
-        <img class="brand-logo" src="/nextnrg-logo.png" style="width:28px;height:28px;object-fit:contain;background:#fff;border-radius:4px;padding:1px">
-        <span class="brand-name">NextNRG</span>
+        <img class="brand-logo" alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" onerror="_logoFallback(this)" style="width:28px;height:28px;object-fit:contain;background:#fff;border-radius:4px;padding:1px">
+        <span class="brand-name"></span>
       </div>
       <div class="p2-page-title">HOW IT WORKS — 5 SIMPLE STEPS</div>
     </div>
     <div class="p3-body" style="padding:26px 40px 18px">
       <div class="p3-title">From Quote to <span style="color:#1D4ED8">Power</span> in 5 Steps</div>
-      <div class="p3-sub" id="p3-sub">NextNRG manages the entire process — you just show up for commissioning.</div>
+      <div class="p3-sub" id="p3-sub">Our team manages the entire process — you just show up for commissioning.</div>
       <div class="steps">
         <div class="step">
           <div class="step-num-col">
@@ -632,7 +632,7 @@ body{font-family:'Inter',-apple-system,Arial,sans-serif;background:#F1F4F8;color
           <div class="step-content">
             <div class="step-label">Step One · Day 1</div>
             <div class="step-title">Share Your Utility Bill</div>
-            <div class="step-desc" id="p3-step1-desc">Provide your last 12 months of utility bills. NextNRG analyzes your peak demand patterns, time-of-use charges, and demand spikes to size the right battery system for maximum savings — no site visit required at this stage.</div>
+            <div class="step-desc" id="p3-step1-desc">Provide your last 12 months of utility bills. Our team analyzes your peak demand patterns, time-of-use charges, and demand spikes to size the right battery system for maximum savings — no site visit required at this stage.</div>
             <span class="step-tag">📄 Upload PDF or photo of utility bill</span>
           </div>
         </div>
@@ -656,7 +656,7 @@ body{font-family:'Inter',-apple-system,Arial,sans-serif;background:#F1F4F8;color
           <div class="step-content">
             <div class="step-label">Step Three · Week 2–6</div>
             <div class="step-title" id="p3-step3-title">Sign Agreement &amp; Process Financing</div>
-            <div class="step-desc" id="p3-step3-desc">Sign your site host or financing agreement. NextNRG submits interconnection applications to your utility, files for available rebates (ComEd BESH, SGIP, NJ BPU, etc.), and applies for applicable federal incentives including the 30% Investment Tax Credit.</div>
+            <div class="step-desc" id="p3-step3-desc">Sign your site host or financing agreement. Our team submits interconnection applications to your utility, files for available rebates (ComEd BESH, SGIP, NJ BPU, etc.), and applies for applicable federal incentives including the 30% Investment Tax Credit.</div>
             <span class="step-tag" id="p3-step3-tag">✅ No upfront payment required</span>
           </div>
         </div>
@@ -687,11 +687,11 @@ body{font-family:'Inter',-apple-system,Arial,sans-serif;background:#F1F4F8;color
     </div>
     <div class="p3-footer">
       <div class="p3-footer-logo">
-        <img class="brand-logo" src="/nextnrg-logo.png" style="width:28px;height:28px;object-fit:contain;background:#fff;border-radius:4px;padding:1px">
-        <span class="brand-name">NextNRG</span>
+        <img class="brand-logo brand-logo-white" alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" onerror="_logoFallback(this)" style="width:28px;height:28px;object-fit:contain;border-radius:4px;padding:1px">
+        <span class="brand-name"></span>
       </div>
       <div class="p3-footer-contact">
-        <span id="p3-contact-line" class="brand-name">NextNRG</span><br>
+        <span id="p3-contact-line" class="brand-name"></span><br>
         <span id="p3-agent-line"></span>
         <span style="display:block;margin-top:6px;font-size:8px;opacity:.6">Powered by ClearSky-OMEGA · © 2025 ClearSky Energy Solutions LLC</span>
       </div>
@@ -704,54 +704,324 @@ body{font-family:'Inter',-apple-system,Arial,sans-serif;background:#F1F4F8;color
 
 <script>
 // ══════════════════════════════════════════════════════════════════
-// BRAND RESOLVER  (multi-tenant — reads leftmost subdomain slug)
+// BRAND RESOLVER  (multi-tenant)
+// ------------------------------------------------------------------
+// Resolution order — first hit wins:
+//   1. window.OMEGA_CONFIG.brand   (config.js is loaded → tenant deployment)
+//   2. ?b=<base64 JSON>            (portal passes its own brand on launch)
+//   3. ?bname= / ?blogo= / ?baccent= / ?btagline=   (plain-param equivalent)
+//   4. LEGACY_BRANDS[slug]         (migration shim — see note below)
+//   5. Convention from slug        (name = slug, logo on tenant portal origin)
+//   6. DEFAULT_BRAND
+//
+// NOTE ON THE SHIM: LEGACY_BRANDS is tenant data living in a shared platform
+// file, which violates the byte-identical rule. It exists only so already-live
+// tenants keep rendering while their portals are migrated to pass brand via
+// (1) or (2). Delete each entry as its portal starts sending brand data;
+// delete the whole map once none remain.
 // ══════════════════════════════════════════════════════════════════
-var BRANDS = {
-  nextnrg:   { name:'NextNRG',        logo:'/nextnrg-logo.png',   accent:'#1D4ED8', tagline:'BATTERY ENERGY STORAGE · EV CHARGING · VPP' },
-  sunesol:   { name:'SunESol',        logo:'/sunesol-logo.png',   accent:'#F59E0B', tagline:'SOLAR · STORAGE · EV CHARGING' },
-  spatco:    { name:'SPATCO',         logo:'/spatco-logo.png',    accent:'#166534', tagline:'ENERGY INFRASTRUCTURE SOLUTIONS' },
-  solela:    { name:'Solela LLC',     logo:'/solela-logo.png',    accent:'#0EA5E9', tagline:'DISTRIBUTED ENERGY · STORAGE' },
-  chileasing:{ name:'Chileasing Energy', logo:'/chileasing-logo.png', accent:'#0EA5E9', tagline:'ENERGY LEASING · STORAGE' },
-  ogisolar:  { name:'OGI Solar',      logo:'/ogisolar-logo.png',  accent:'#EA580C', tagline:'SOLAR · STORAGE · EV' },
-  lionheart: { name:'Lionheart Energy', logo:'/lionheart-logo.png', accent:'#B91C1C', tagline:'EV CHARGING SOLUTIONS' }
-};
-var DEFAULT_BRAND = { name:'ClearSky-OMEGA', logo:'/clearsky-omega-mark-white.png', accent:'#1D4ED8', tagline:'DISTRIBUTED ENERGY PLATFORM' };
+var LEGACY_BRANDS = {
+  nextnrg:   { name:'NextNRG', accent:'#1D4ED8', tagline:'BATTERY ENERGY STORAGE · EV CHARGING · VPP' },
+  sunesol:   { name:'SunESol', accent:'#F59E0B', tagline:'SOLAR · STORAGE · EV CHARGING' },
+  spatco:    { name:'SPATCO', accent:'#166534', tagline:'ENERGY INFRASTRUCTURE SOLUTIONS' },
+  solela:    { name:'Solela LLC', accent:'#0EA5E9', tagline:'DISTRIBUTED ENERGY · STORAGE' },
+  chileasing:{ name:'Chileasing Energy', accent:'#0EA5E9', tagline:'ENERGY LEASING · STORAGE' },
+  ogisolar:  { name:'OGI Solar', accent:'#EA580C', tagline:'SOLAR · STORAGE · EV' },
+  lionheart: { name:'Lionheart Energy', accent:'#B91C1C', tagline:'EV CHARGING SOLUTIONS' },
 
-// Resolve the tenant from ?org=  →  ?brand=  →  hostname (in that order),
-// so the proposal can live on tools.csebuilders.com and still brand itself to
-// whatever tenant launched it via ?org=<domain> (e.g. ?org=nextnrg.com).
+  // TODO(thomas): confirm accent + tagline + logo filename with each tenant.
+  // Present so they stop falling through to DEFAULT_BRAND and printing as ClearSky.
+  fenecon:   { name:'FENECON', accent:'#1D4ED8', tagline:'ENERGY STORAGE SYSTEMS' },
+  iqgen:     { name:'iQGen Technologies', accent:'#1D4ED8', tagline:'DISTRIBUTED ENERGY · STORAGE' }
+};
+var DEFAULT_BRAND = { name:'ClearSky-OMEGA', logo:'', accent:'#1D4ED8', tagline:'DISTRIBUTED ENERGY PLATFORM' };
+
 function _orgToSlug(org) {
   if (!org) return '';
   org = String(org).toLowerCase().trim().replace(/^https?:\/\//,'').split('/')[0];
-  return org.split('.')[0] || '';   // "nextnrg.com" -> "nextnrg"
+  return org.split('.')[0] || '';   // "sunesol.com" -> "sunesol"
 }
 function _tenantOrg() {
   try { var m = (location.search||'').match(/[?&]org=([^&]+)/); if (m) return decodeURIComponent(m[1]).toLowerCase(); } catch(e){}
   return '';
 }
+// Subdomains that are platform infrastructure, not tenants. Without this,
+// tools.csebuilders.com resolves to a phantom tenant named "Tools".
+var RESERVED_SUBDOMAINS = { tools:1, www:1, app:1, api:1, admin:1, demo:1, portal:1, staging:1, preview:1, cdn:1, assets:1 };
+
 function _slugFromHost() {
   try {
-    var org = _tenantOrg(); if (org) { var s = _orgToSlug(org); if (s) return s; }
+    var org = _tenantOrg(); if (org) { var s = _orgToSlug(org); if (s && !RESERVED_SUBDOMAINS[s]) return s; }
     var m = (location.search||'').match(/[?&]brand=([^&]+)/); if (m) return decodeURIComponent(m[1]).toLowerCase();
     var h = (location.hostname || '').toLowerCase(); var parts = h.split('.');
-    if (parts.length >= 3 && parts[parts.length-2] === 'csebuilders') return parts[0];
+    if (parts.length >= 3 && parts[parts.length-2] === 'csebuilders' && !RESERVED_SUBDOMAINS[parts[0]]) return parts[0];
     return '';
   } catch(e){ return ''; }
 }
+// ── Tenant origin ────────────────────────────────────────────────
+// The tenant's live deployment is on clearskyomega.com (Vercel), NOT on
+// csebuilders.com — csebuilders.com hosts the shared tool registry. When the
+// portal launches this tool it passes ?return=<portal url>, which is the
+// authoritative origin for that tenant's assets. Use it before guessing.
+function _returnOrigin() {
+  try {
+    var m = (location.search||'').match(/[?&]return=([^&]+)/);
+    if (!m) return '';
+    var u = new URL(decodeURIComponent(m[1]), location.href);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return '';
+    return u.origin;
+  } catch(e){ return ''; }
+}
+// Every origin that might serve this tenant's assets, best guess first.
+function _tenantOrigins(slug) {
+  var out = [], seen = {};
+  function push(o){ if (o && !seen[o]) { seen[o] = 1; out.push(o); } }
+  push(_returnOrigin());                                        // 1. told to us by the portal
+  if (slug) {
+    push('https://' + slug + '.clearskyomega.com');             // 2. tenant deployment convention
+    push('https://' + slug + '.csebuilders.com');               // 3. legacy
+  }
+  return out;
+}
+function _tenantOrigin(slug) {
+  var o = _tenantOrigins(slug);
+  return o.length ? o[0] : '';
+}
 // Portal URL for the tenant the user came from.
 function _portalUrl() {
-  var org = _tenantOrg();
-  var slug = org ? _orgToSlug(org) : _slugFromHost();
-  if (slug) return 'https://' + slug + '.csebuilders.com/';
+  try {
+    var m = (location.search||'').match(/[?&]return=([^&]+)/);
+    if (m) { var u = new URL(decodeURIComponent(m[1]), location.href);
+             if (u.protocol === 'https:' || u.protocol === 'http:') return u.href; }
+  } catch(e){}
+  var slug = _slugFromHost();
+  if (slug) return 'https://' + slug + '.clearskyomega.com/';
   return '/';
+}
+// Force every logo reference to an ABSOLUTE url.
+// Root-relative ("/sunesol-logo.png") was the original bug: it resolved against
+// whatever origin served this tool (tools.csebuilders.com, or file:// once the
+// proposal is downloaded) rather than against the tenant's own deployment.
+function _absLogo(logo, slug) {
+  if (!logo) return '';
+  logo = String(logo).trim();
+  if (/^(https?:)?\/\//i.test(logo) || /^data:/i.test(logo)) return logo;   // already absolute
+  var origin = _tenantOrigin(slug);
+  if (!origin) return logo;                                                 // no origin: leave as-is
+  return origin + '/' + logo.replace(/^\/+/, '');
+}
+// ── Logo URL candidates ──────────────────────────────────────────
+// We do not reliably know the filename each tenant repo uses for its mark, so
+// try the configured name first and then the common conventions across every
+// plausible origin. Each <img> walks this list via onerror and hides itself if
+// the list runs out — a client never sees a broken-image glyph.
+// Observed tenant-repo convention (github.com/clearskyenergy/<slug>):
+//   <slug>-logo-color.png   — for light backgrounds
+//   <slug>-logo-white.png   — for dark backgrounds (page-3/4 footers)
+// Generic names are kept as trailing fallbacks for older tenant repos.
+function _logoPaths(slug, variant) {
+  var p = [];
+  if (slug) {
+    if (variant === 'white') {
+      p.push(slug + '-logo-white.png', slug + '-logo-color.png');
+    } else {
+      p.push(slug + '-logo-color.png', slug + '-logo-white.png');
+    }
+    p.push(slug + '-logo.png', slug + '-logo.svg');
+  }
+  p.push('logo.png', 'logo.svg', 'assets/logo.png', 'img/logo.png');
+  return p;
+}
+function _logoCandidates(brand, slug, variant) {
+  var out = [], seen = {};
+  function push(u){ if (u && !seen[u]) { seen[u] = 1; out.push(u); } }
+
+  // An explicit config.js value always wins.
+  var cfgLogo = brand && (variant === 'white' ? (brand.logoWhite || brand.logo) : (brand.logoColor || brand.logo));
+  if (cfgLogo && (/^(https?:)?\/\//i.test(cfgLogo) || /^data:/i.test(cfgLogo))) push(cfgLogo);
+
+  var origins = _tenantOrigins(slug);
+  var paths   = [];
+  if (cfgLogo && !/^(https?:)?\/\//i.test(cfgLogo) && !/^data:/i.test(cfgLogo)) paths.push(String(cfgLogo).replace(/^\/+/, ''));
+  paths = paths.concat(_logoPaths(slug, variant));
+
+  for (var o = 0; o < origins.length; o++)
+    for (var q = 0; q < paths.length; q++)
+      push(origins[o] + '/' + paths[q]);
+
+  return out;
+}
+// onerror handler wired onto every img.brand-logo
+function _logoFallback(img) {
+  try {
+    var white = img.className.indexOf('brand-logo-white') !== -1;
+    var list  = (window.BRAND && (white ? BRAND.logoCandidatesWhite : BRAND.logoCandidates)) || [];
+    var i = (parseInt(img.getAttribute('data-logo-i'), 10) || 0) + 1;
+    if (i < list.length) { img.setAttribute('data-logo-i', String(i)); img.src = list[i]; return; }
+  } catch(e){}
+  img.style.visibility = 'hidden';   // exhausted — fail invisibly, never show a glyph
+}
+function _qp(name) {
+  try {
+    var m = (location.search||'').match(new RegExp('[?&]' + name + '=([^&]+)'));
+    return m ? decodeURIComponent(m[1].replace(/\+/g,' ')) : '';
+  } catch(e){ return ''; }
+}
+function _brandFromConfig() {
+  var C = (window.OMEGA_CONFIG || window.CONFIG || {});
+  var b = C.brand || C.branding || null;
+  if (!b || !b.name) return null;
+  return { name:b.name, logo:(b.logo||b.logoUrl||''), accent:(b.accent||b.accentColor||'#1D4ED8'), tagline:(b.tagline||'') };
+}
+function _brandFromParams() {
+  var raw = _qp('b');
+  if (raw) {
+    try {
+      var o = JSON.parse(decodeURIComponent(escape(atob(raw.replace(/-/g,'+').replace(/_/g,'/')))));
+      if (o && o.name) return { name:o.name, logo:(o.logo||''), accent:(o.accent||'#1D4ED8'), tagline:(o.tagline||'') };
+    } catch(e){}
+  }
+  var n = _qp('bname');
+  if (n) return { name:n, logo:_qp('blogo'), accent:(_qp('baccent')||'#1D4ED8'), tagline:_qp('btagline') };
+  return null;
+}
+function _titleFromSlug(slug) {
+  return slug.split(/[-_]/).map(function(w){ return w ? w.charAt(0).toUpperCase()+w.slice(1) : w; }).join(' ');
 }
 function resolveBrand() {
   var slug = _slugFromHost();
-  if (slug && BRANDS[slug]) return BRANDS[slug];
-  return DEFAULT_BRAND;
+  var b = _brandFromConfig() || _brandFromParams();
+
+  if (!b && slug && LEGACY_BRANDS[slug]) {
+    b = LEGACY_BRANDS[slug];
+    b = { name:b.name, logo:b.logo, accent:b.accent, tagline:b.tagline };   // copy, don't mutate the map
+  }
+  if (!b && slug) {
+    b = { name:_titleFromSlug(slug), logo:slug + '-logo.png', accent:DEFAULT_BRAND.accent, tagline:'' };
+  }
+  if (!b) b = { name:DEFAULT_BRAND.name, logo:DEFAULT_BRAND.logo, accent:DEFAULT_BRAND.accent, tagline:DEFAULT_BRAND.tagline };
+
+  b.logoCandidates      = _logoCandidates(b, slug, 'color');
+  b.logoCandidatesWhite = _logoCandidates(b, slug, 'white');
+  b.logo      = b.logoCandidates[0]      || '';
+  b.logoWhiteUrl = b.logoCandidatesWhite[0] || '';
+  b.slug = slug;
+  return b;
 }
+// ══════════════════════════════════════════════════════════════════
+// TENANT CONFIG LOADER
+// ------------------------------------------------------------------
+// config.js lives in the TENANT repo (github.com/clearskyenergy/<slug>) and is
+// served from the tenant deployment. This tool is served from
+// tools.csebuilders.com, so config.js is never on our page by default.
+//
+// We pull it in with a <script> tag rather than fetch(): script tags are not
+// subject to CORS, so this works against a stock Vercel static deploy with no
+// header changes on the tenant side and no per-tenant edits to this file.
+//
+// Everything below is best-effort. If the fetch fails, or config.js exposes a
+// shape we do not recognise, the slug-convention fallbacks still carry us.
+var CONFIG_GLOBALS = ['OMEGA_CONFIG','CONFIG','TENANT_CONFIG','CLEARSKY_CONFIG','SITE_CONFIG','PORTAL_CONFIG'];
+
+function _readTenantConfig() {
+  for (var i = 0; i < CONFIG_GLOBALS.length; i++) {
+    var C = window[CONFIG_GLOBALS[i]];
+    if (!C || typeof C !== 'object') continue;
+    var b = C.brand || C.branding || C;
+    if (b && (b.name || b.logo || b.logoColor || b.logoWhite)) {
+      return {
+        name:      b.name || b.company || b.orgName || '',
+        logo:      b.logo || b.logoUrl || '',
+        logoColor: b.logoColor || b.logoLight || b.logo || '',
+        logoWhite: b.logoWhite || b.logoDark || '',
+        accent:    b.accent || b.accentColor || b.primaryColor || '',
+        tagline:   b.tagline || b.subtitle || ''
+      };
+    }
+  }
+  return null;
+}
+
+function loadTenantConfig() {
+  return new Promise(function(resolve) {
+    var origin = _tenantOrigin(_slugFromHost());
+    if (!origin) return resolve(null);
+    var sc = document.createElement('script');
+    sc.src = origin + '/config.js';
+    sc.async = true;
+    var done = false;
+    function finish(){ if (done) return; done = true; resolve(_readTenantConfig()); }
+    sc.onload  = finish;
+    sc.onerror = function(){ if (!done) { done = true; resolve(null); } };
+    setTimeout(finish, 4000);          // never hang the page on a slow tenant host
+    document.head.appendChild(sc);
+  });
+}
+
+// Re-resolve the brand once the tenant config has landed, then repaint.
+function applyTenantConfig(cfg) {
+  if (!cfg) return;
+  var slug = BRAND.slug;
+  if (cfg.name)    BRAND.name    = cfg.name;
+  if (cfg.accent)  BRAND.accent  = cfg.accent;
+  if (cfg.tagline) BRAND.tagline = cfg.tagline;
+  if (cfg.logoColor || cfg.logoWhite || cfg.logo) {
+    var src = { logo:cfg.logo, logoColor:cfg.logoColor, logoWhite:cfg.logoWhite };
+    BRAND.logoCandidates      = _logoCandidates(src, slug, 'color');
+    BRAND.logoCandidatesWhite = _logoCandidates(src, slug, 'white');
+    BRAND.logo         = BRAND.logoCandidates[0]      || '';
+    BRAND.logoWhiteUrl = BRAND.logoCandidatesWhite[0] || '';
+  }
+  applyBrand();
+}
+
 var BRAND = resolveBrand();
 function _bn(){ return BRAND.name; }
+
+// ── Logo inlining ────────────────────────────────────────────────
+// Exported proposals get emailed and opened off-network. Fetch the logo once
+// and swap in a data: URI so the artifact is self-contained. Silent no-op on
+// failure — the onerror handler on each <img> hides it rather than printing
+// a broken-image glyph in front of a client.
+function inlineBrandLogo() {
+  // Wait for the candidate walk to settle on a URL that actually loaded, then
+  // inline THAT one. Reading BRAND.logo directly would inline the first guess,
+  // which may well be the 404 that triggered the fallback.
+  function settled() {
+    var l = document.querySelectorAll('img.brand-logo');
+    for (var i=0;i<l.length;i++) if (l[i].naturalWidth > 0 && l[i].currentSrc) return l[i].currentSrc;
+    return '';
+  }
+  var tries = 0;
+  (function poll(){
+    var url = settled();
+    if (!url) {
+      if (++tries > 40) return;           // ~6s of candidate walking, then give up
+      return setTimeout(poll, 150);
+    }
+    if (/^data:/i.test(url)) return;      // already inline
+    fetch(url, { mode:'cors', cache:'force-cache' })
+      .then(function(r){ if (!r.ok) throw new Error(r.status); return r.blob(); })
+      .then(function(blob){
+        return new Promise(function(res, rej){
+          var fr = new FileReader();
+          fr.onload  = function(){ res(fr.result); };
+          fr.onerror = rej;
+          fr.readAsDataURL(blob);
+        });
+      })
+      .then(function(dataUri){
+        BRAND.logo = dataUri;
+        var l = document.querySelectorAll('img.brand-logo');
+        for (var i=0;i<l.length;i++) l[i].src = dataUri;
+      })
+      .catch(function(){
+        // Cross-origin without CORS headers. The <img> still displays fine on
+        // screen and in Print/PDF; only a downloaded .html loses the logo.
+        // Fix by adding Access-Control-Allow-Origin to the logo on the tenant deploy.
+      });
+  })();
+}
 
 function applyBrand() {
   // accent color everywhere (CSS vars already reference --accent)
@@ -763,8 +1033,21 @@ function applyBrand() {
   var hs = document.querySelector('.hdr-sub'); if (hs) hs.textContent = BRAND.name;
 
   // all logo images (marked with .brand-logo)
+  // Empty logo -> hide the slot. Never assign an empty/undefined src: that is
+  // what produced the broken-image "?" glyph in printed proposals.
   var logos = document.querySelectorAll('img.brand-logo');
-  for (var i=0;i<logos.length;i++){ logos[i].src = BRAND.logo; logos[i].alt = BRAND.name; }
+  for (var i=0;i<logos.length;i++){
+    var isWhite = logos[i].className.indexOf('brand-logo-white') !== -1;
+    var first   = isWhite ? BRAND.logoWhiteUrl : BRAND.logo;
+    if (first) {
+      logos[i].setAttribute('data-logo-i','0');
+      logos[i].alt = BRAND.name;
+      logos[i].style.visibility = '';
+      logos[i].src = first;
+    } else {
+      logos[i].style.visibility = 'hidden';
+    }
+  }
 
   // all brand-name text spans (marked with .brand-name)
   var names = document.querySelectorAll('.brand-name');
@@ -822,7 +1105,10 @@ function _wireBackLink(){
   if (a) a.setAttribute('href', _portalUrl());
 }
 window.onload = function() {
-  applyBrand();
+  applyBrand();                       // paint immediately from slug convention
+  loadTenantConfig()                  // then refine from the tenant's own config.js
+    .then(applyTenantConfig)
+    .then(function(){ inlineBrandLogo(); });
   _wireBackLink();
   // Set today's date
   var today = new Date().toISOString().split('T')[0];
@@ -1392,7 +1678,12 @@ function drawEquipment(ctx, type, x, y, alpha) {
 function loadSatellite() {
   var addr = document.getElementById('map-addr').value.trim();
   if (!addr) { alert('Enter an address first'); return; }
-  var key = 'AIzaSyC0roZ_qMwtbVzqRLtNx9nrCeaGqrE1sNs';
+  // SECURITY: this key ships inside every exported proposal HTML that gets
+  // emailed to clients. It MUST be restricted by HTTP referrer in Cloud Console
+  // (tools.csebuilders.com + *.csebuilders.com) and scoped to Static Maps only.
+  // Prefer setting OMEGA_CONFIG.mapsKey in config.js so the literal below can
+  // eventually be deleted.
+  var key = ((window.OMEGA_CONFIG || {}).mapsKey) || 'AIzaSyC0roZ_qMwtbVzqRLtNx9nrCeaGqrE1sNs';
   var url  = 'https://maps.googleapis.com/maps/api/staticmap?center=' + encodeURIComponent(addr)
            + '&zoom=18&size=320x220&maptype=satellite&key=' + key;
   var img = new Image();
