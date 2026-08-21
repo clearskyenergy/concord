@@ -65124,7 +65124,15 @@ window._elecPrint=function(){
    door, so showing the button is not granting anything — it only stops a
    licensed tenant being told the tool does not exist. */
 var _EV_WB_HOSTS  = ['alpha.clearskyomega.com','localhost','127.0.0.1'];
-function _evTenantHost(h){ return /\.csebuilders\.com$/.test(String(h||'').toLowerCase()); }
+/* Tenant portals are <tenant>.csebuilders.com OR <tenant>.clearskyomega.com
+   — the same pair _slugFromHost() already keys tenancy off, and the reason
+   concordenergyusa.clearskyomega.com saw no button when this matched only
+   the csebuilders family. A bare platform domain is not a tenant, so a
+   sub-domain label is required. */
+function _evTenantHost(h){
+  h=String(h||'').toLowerCase();
+  return /(^|\.)(csebuilders|clearskyomega)\.com$/.test(h) && h.split('.').length>=3;
+}
 /* The workbook lives on the shared tools host with everything else, and the
    console has no rewrite for it — so this is an absolute URL. */
 var _EV_WB_ORIGIN = 'https://tools.csebuilders.com';
