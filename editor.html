@@ -65114,11 +65114,17 @@ window._elecPrint=function(){
    any estimator overrides) into localStorage and opens the workbook tool,
    which maps the lines into the utility application and customer proposal.
    ---------------------------------------------------------------------- */
-/* The editor is served to every tenant through the shared rewrite, but the
-   cost workbook lives only on the internal OMEGA portal. Show the button
-   there and nowhere else, so a tenant never sees a control that leads to a
-   locked page. */
+/* The editor is served to every tenant through the shared rewrite. The cost
+   workbook used to be internal-only, so the button was shown on the OMEGA
+   portal and nowhere else — a tenant who found it got a locked page.
+
+   Tenants are now licensed to run the workbook, so the button follows the
+   licence: the internal portal, plus any tenant portal on the
+   <name>.csebuilders.com family. The workbook still checks identity at the
+   door, so showing the button is not granting anything — it only stops a
+   licensed tenant being told the tool does not exist. */
 var _EV_WB_HOSTS  = ['alpha.clearskyomega.com','localhost','127.0.0.1'];
+function _evTenantHost(h){ return /\.csebuilders\.com$/.test(String(h||'').toLowerCase()); }
 /* The workbook lives on the shared tools host with everything else, and the
    console has no rewrite for it — so this is an absolute URL. */
 var _EV_WB_ORIGIN = 'https://tools.csebuilders.com';
@@ -65126,6 +65132,7 @@ var _EV_WB_URL    = _EV_WB_ORIGIN + '/ev-cost-workbook.html';
 window._elecWorkbookHost = function(){
   var h = String(location.hostname||'').toLowerCase(), i;
   for(i=0;i<_EV_WB_HOSTS.length;i++){ if(h===_EV_WB_HOSTS[i]) return true; }
+  if(_evTenantHost(h)) return true;
   return false;
 };
 
