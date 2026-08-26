@@ -2832,6 +2832,7 @@ if(document.readyState==='loading'){
       <button id="btn-hidemap" onclick="toggleMapHidden()" title="Hide the map and work on a plain grid" style="flex:0 0 auto;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--sub);cursor:pointer;font-size:10px">◫ Hide</button>
     </div>
     <div style="margin-top:5px">
+      <button id="btn-hideevselbl" onclick="toggleEvseLabels()" title="Ten chargers means ten overlapping label plates that all say the same thing. Collapse them to one legible plate on the cluster -- individual labels still print in permit exports." style="width:100%;padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--sub);cursor:pointer;font-size:10px;margin-bottom:4px">Collapse EVSE labels</button>
       <button id="btn-hidebollards" onclick="toggleBollards()" title="Bollards can read as noise when zoomed out. Hide them on the map view -- they still print in permit exports." style="width:100%;padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--sub);cursor:pointer;font-size:10px">Hide bollards</button>
     </div>
     <!-- Google Maps mode controls -->
@@ -6873,13 +6874,29 @@ function renderCtypes(){
     + '<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--sub);margin-bottom:5px">Routing / Trenching</div>'
     + '<select id="cond-route-mode" onchange="S.condRoute=this.value" style="width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:5px 8px;font-size:10px;font-family:inherit;margin-bottom:6px">'
     +   '<option value="surface"'+((S.condRoute||'surface')==='surface'?' selected':'')+'>Surface mount (above grade)</option>'
-    +   '<option value="trench-ground"'+(S.condRoute==='trench-ground'?' selected':'')+'>Trench -- in-ground</option>'
+    +   '<option value="trench-ground"'+(S.condRoute==='trench-ground'?' selected':'')+'>Trench -- in-ground (turf, ground cover)</option>'
+    /* Sawcut asphalt was missing from both selectors even though the model,
+       the drawing tag and the BOM all support it. With no way to pick it,
+       every run stayed in-ground and the utility sheet reported turf
+       excavation at $10/$60 per foot on jobs that are actually cut through
+       pavement at $15/$80 — a real difference on the submitted matrix. */
+    +   '<option value="trench-asphalt"'+(S.condRoute==='trench-asphalt'?' selected':'')+'>Trench -- sawcut asphalt</option>'
     +   '<option value="trench-concrete"'+(S.condRoute==='trench-concrete'?' selected':'')+'>Trench -- sawcut concrete</option>'
     + '</select>'
     + '<div style="font-size:8.5px;color:var(--sub);line-height:1.5;margin-bottom:6px">Applies to conduits you draw or auto-wire next. Click any conduit\u2019s label to cycle its routing.</div>'
     + '<button onclick="applyRouteToAll(\'power\')" style="width:100%;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);color:var(--amber);border-radius:4px;padding:5px;font-size:9.5px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:4px">Apply to all AC/DC power runs</button>'
     + '<button onclick="applyRouteToAll(\'all\')" style="width:100%;background:rgba(124,58,237,.1);border:1px solid rgba(124,58,237,.3);color:#A78BFA;border-radius:4px;padding:5px;font-size:9.5px;font-weight:700;cursor:pointer;font-family:inherit">Apply to all conduit runs</button>'
     + '</div>';
+}
+
+/* Both confirmation banners omitted asphalt and fell through to "in-ground
+   trench", so a run set to sawcut-asphalt reported itself as in-ground and
+   looked like the change had not taken. */
+function _routeWord(mode){
+  return mode==='surface'         ? 'surface mount'
+       : mode==='trench-concrete' ? 'sawcut-concrete trench'
+       : mode==='trench-asphalt'  ? 'sawcut-asphalt trench'
+       :                            'in-ground trench';
 }
 
 // Set S.condRoute -> route + trenchIn fields on a conduit object.
@@ -6903,7 +6920,7 @@ function applyRouteToAll(scope){
   });
   if(typeof _updateConduitSchedule==='function') _updateConduitSchedule();
   if(typeof updCondStat==='function') updCondStat();
-  if(typeof showBanner==='function') showBanner('cond','OK Routing applied to '+n+' run'+(n===1?'':'s')+' -- '+(mode==='surface'?'surface mount':mode==='trench-concrete'?'sawcut-concrete trench':'in-ground trench'));
+  if(typeof showBanner==='function') showBanner('cond','OK Routing applied to '+n+' run'+(n===1?'':'s')+' -- '+_routeWord(mode));
 }
 
 // Cycle a single conduit's routing method (surface -> ground -> concrete).
@@ -6922,7 +6939,7 @@ function cycleConduitRoute(id){
   var g=document.querySelector('[data-cid="'+c.id+'"]'); if(g&&g.parentNode) g.parentNode.removeChild(g);
   renderConduit(c);
   if(typeof _updateConduitSchedule==='function') _updateConduitSchedule();
-  if(typeof showBanner==='function') showBanner('cond','Conduit routing: '+(next==='surface'?'surface mount':next==='trench-concrete'?'sawcut-concrete trench':'in-ground trench'));
+  if(typeof showBanner==='function') showBanner('cond','Conduit routing: '+_routeWord(next));
 }
 
 // == WIZARD ==================================================
@@ -33055,6 +33072,82 @@ function ctxToggleLabel() {
   toggleElLabel(_ctxElId);
   closeCtxMenu();
 }
+
+/* == COLLAPSE THE EVSE LABELS =================================
+   Ten chargers means ten "EVSE 9 . Autel AC Pro" plates plus ten
+   "80A . 60A circuit . J1772 / NACS" sub-lines, and on a tight parking
+   run they overlap into an unreadable stack. They all say the same thing,
+   so this hides the per-unit labels and leaves one legible plate on the
+   cluster: model, count and circuit. The labels are only hidden — every
+   element keeps its own label for permit exports and for the moment you
+   switch it back. */
+function toggleEvseLabels(){
+  window._hideEvseLabels = !window._hideEvseLabels;
+  var hide = window._hideEvseLabels, i, el, touched=[];
+  for(i=0;i<(S.elements||[]).length;i++){
+    el=S.elements[i];
+    if(!_isEvseEl(el)) continue;
+    /* remember what the user had set, so unhiding does not resurrect a
+       label they deliberately turned off one at a time */
+    if(hide){ if(el._lblWas===undefined) el._lblWas = !!el.hideLabel; el.hideLabel = true; }
+    else    { el.hideLabel = (el._lblWas===undefined) ? false : el._lblWas; delete el._lblWas; }
+    touched.push(el);
+  }
+  touched.forEach(function(e){
+    var dom=document.querySelector('[data-elid="'+e.id+'"]');
+    if(dom) dom.remove();
+    try{ renderEl(e); }catch(err){}
+  });
+  _renderEvseGroupLabel();
+  var btn=document.getElementById('btn-hideevselbl');
+  if(btn){
+    btn.style.background=hide?'rgba(0,212,255,.2)':'var(--surface)';
+    btn.style.color=hide?'var(--accent)':'var(--sub)';
+    btn.style.borderColor=hide?'var(--accent)':'var(--border)';
+    btn.textContent=hide?'Show EVSE labels':'Collapse EVSE labels';
+  }
+  if(typeof showBanner==='function')
+    showBanner('wiz', hide ? 'EVSE labels collapsed to one plate. Individual labels still print in exports.'
+                           : 'EVSE labels shown.');
+}
+function _isEvseEl(el){
+  var t=String((el&&(el.type||el.eqId))||'').toLowerCase();
+  var l=String((el&&(el.label||el.name))||'').toLowerCase();
+  return t.indexOf('charger')>=0 || t.indexOf('evse')>=0 || l.indexOf('evse')>=0;
+}
+/* One plate at the centre of the cluster, sized to be read at the zoom a
+   ten-charger run is drawn at. */
+function _renderEvseGroupLabel(){
+  var host=document.getElementById('els');
+  var old=document.getElementById('evse-group-lbl');
+  if(old&&old.parentNode) old.parentNode.removeChild(old);
+  if(!window._hideEvseLabels || !host) return;
+  var els=(S.elements||[]).filter(_isEvseEl);
+  if(!els.length) return;
+  var sx=0, sy=0, i;
+  for(i=0;i<els.length;i++){ sx+=(+els[i].x||0); sy+=(+els[i].y||0); }
+  var cx=sx/els.length, cy=sy/els.length;
+  /* the models on the drawing, counted */
+  var byModel={}, k, parts=[];
+  for(i=0;i<els.length;i++){
+    k=String(els[i].model||els[i].label||'EVSE').replace(/^EVSE\s*\d+\s*[\u00b7.-]\s*/,'').trim();
+    byModel[k]=(byModel[k]||0)+1;
+  }
+  for(k in byModel) if(byModel.hasOwnProperty(k)) parts.push(k+' \u00d7'+byModel[k]);
+  var sub=String(els[0].sublabel||els[0].sub||'').trim();
+  var d=document.createElement('div');
+  d.id='evse-group-lbl';
+  d.setAttribute('data-noexport','1');
+  d.style.cssText='position:absolute;left:'+cx+'px;top:'+cy+'px;transform:translate(-50%,-50%);'
+    +'padding:8px 14px;border-radius:8px;background:rgba(10,12,18,.92);'
+    +'border:1px solid rgba(0,212,255,.55);color:#fff;font-weight:700;font-size:15px;'
+    +'letter-spacing:.2px;white-space:nowrap;pointer-events:none;z-index:9;'
+    +'box-shadow:0 2px 10px rgba(0,0,0,.5)';
+  d.innerHTML='<div>'+parts.join(' \u00b7 ')+'</div>'
+    + (sub?'<div style="font-weight:500;font-size:11px;opacity:.8;margin-top:2px">'+sub+'</div>':'');
+  host.appendChild(d);
+}
+window.toggleEvseLabels=toggleEvseLabels;
 
 function toggleElLabel(elId) {
   const el = S.elements.find(x=>x.id===elId);
@@ -62789,7 +62882,8 @@ function openConduitMenu(){
       +'<label style="'+lbl+'">Trenching method</label>'
       +'<select id="cd-route" style="'+sel+'">'
         +'<option value="surface"'+(routeMode==='surface'?' selected':'')+'>Surface mount (above grade)</option>'
-        +'<option value="trench-ground"'+(routeMode==='trench-ground'?' selected':'')+'>Trench \u2014 in-ground</option>'
+        +'<option value="trench-ground"'+(routeMode==='trench-ground'?' selected':'')+'>Trench \u2014 in-ground (turf, ground cover)</option>'
+        +'<option value="trench-asphalt"'+(routeMode==='trench-asphalt'?' selected':'')+'>Trench \u2014 sawcut asphalt</option>'
         +'<option value="trench-concrete"'+(routeMode==='trench-concrete'?' selected':'')+'>Trench \u2014 sawcut concrete</option>'
       +'</select>'
       +'<div style="display:flex;gap:10px">'
@@ -65151,31 +65245,98 @@ window._elecWorkbookHost = function(){
    by route, because they price at different rates. */
 function _evFeetFromCanvas(){
   var list=[]; try{ list=(typeof S!=='undefined' && S.conduits)?S.conduits:[]; }catch(e){}
-  var ug=0, ag=0, cable=0, pavedRuns=0, i, c, lf;
+  var ug=0, ag=0, cable=0, pavedRuns=0, turfRuns=0, i, c, lf;
   for(i=0;i<list.length;i++){
     c=list[i];
     /* stamp first: _cdEstLf reads the riser allowance it sets */
     try{ if(typeof _cdStamp==='function') _cdStamp(c); }catch(e){}
     lf = (typeof _cdEstLf==='function') ? _cdEstLf(c) : (+c.ftLen||0);
-    if(c.route==='trench') ug+=lf; else ag+=lf;
+    /* Underground vs above-ground/indoor is about where the conduit RUNS,
+       not which tool drew it. The interior service->panel feed is tagged
+       L2-INT and is EMT, which is not rated for direct burial — but it is
+       drawn on a trench route, so it was being counted as underground and
+       priced at the buried rate. It belongs on Conduit & Cable - Above
+       Ground/Indoor with the rest of the interior work. */
+    var _cType=String(c.condType||'').toUpperCase();
+    var _cLbl =String(c.label||'').toLowerCase();
+    var _indoor = _cType.indexOf('INT')>=0 || _cType.indexOf('EMT')>=0
+               || _cLbl.indexOf('interior')>=0 || _cLbl.indexOf('indoor')>=0;
+    if(c.route==='trench' && !_indoor) ug+=lf; else ag+=lf;
     cable += (typeof _cdCableLf==='function') ? _cdCableLf(c) : 0;
-    if(c.route==='trench' && (c.trenchIn==='concrete'||c.trenchIn==='asphalt'))
-      pavedRuns += (+c.ftLen||0);
+    /* Surface type from the TRENCHED runs only, counting both kinds. Turf
+       taken as "corridor total minus paved" invented 7 ft of excavation on a
+       job whose only non-paved footage was a 7.2 ft INTERIOR run — the
+       corridor total counts that run, and an interior conduit is not a
+       trench. */
+    /* an interior run is not excavation, so it does not vote on the surface */
+    if(c.route==='trench' && !_indoor){
+      if(c.trenchIn==='concrete'||c.trenchIn==='asphalt') pavedRuns += (+c.ftLen||0);
+      else turfRuns += (+c.ftLen||0);
+    }
   }
   /* Trench counts each shared corridor once — never the sum of the conduit
      lengths in it. trenchTotals() is the same function the schedule uses. */
   var tt=(typeof trenchTotals==='function')?trenchTotals():{ft:0,corridors:0};
-  var paved=Math.min(pavedRuns, tt.ft);   /* runs share corridors; cap it */
+
+  /* How much trench there actually is. trenchTotals() measures the CORRIDOR,
+     which counts every run laid in it — including the interior feed, which
+     is not dug. On 112 Willow that reported 156 ft against 141.9 ft of
+     branch actually trenched, so the sheet billed 14 ft of excavation that
+     nobody digs.
+
+     min() is what makes both cases right: when runs share a corridor the
+     sum exceeds the corridor and the corridor wins (no double-count); when
+     the corridor carries a run that is not excavation, the trenched footage
+     is smaller and it wins. */
+  var dug = pavedRuns + turfRuns;
+  var trenchFt = dug>0 ? Math.min(tt.ft, dug) : 0;
+
+  var kind=dug, paved, turf;
+  if(kind>0){ paved=trenchFt*(pavedRuns/kind); turf=trenchFt*(turfRuns/kind); }
+  else { paved=0; turf=0; }
   return {
-    trench:      Math.round(tt.ft),
+    trench:      Math.round(trenchFt),
     trenchPaved: Math.round(paved),
-    trenchTurf:  Math.round(Math.max(0, tt.ft-paved)),
+    trenchTurf:  Math.round(turf),
     conduitUG:   Math.round(ug),
     conduitAG:   Math.round(ag),
     conduit:     Math.round(ug+ag),
     cable:       Math.round(cable),
-    trenchDrawn: tt.ft>0
+    trenchDrawn: trenchFt>0
   };
+}
+
+/* What is actually PLACED on the drawing. The takeoff sent footage and
+   chargers but never the equipment, so bollards, concrete pads, transformer
+   pads, handholes and the meter had to be typed into the cost sheet by hand
+   on every job — the drawing knew all of it. Counting them here closes the
+   last gap between the map and the matrix. */
+function _evCountsFromCanvas(){
+  var els=[]; try{ els=(typeof S!=='undefined' && S.elements)?S.elements:[]; }catch(e){}
+  var c={ bollard:0, pad:0, xfmrpad:0, handhole:0, meter:0, panel:0, disco:0, charger:0 };
+  var i, t;
+  for(i=0;i<els.length;i++){
+    t=String((els[i]&&(els[i].type||els[i].eqId))||'').toLowerCase();
+    if(!t) continue;
+    if(t.indexOf('bollard')>=0)                       c.bollard++;
+    else if(t.indexOf('jbox')>=0||t.indexOf('handhole')>=0||t.indexOf('pull')>=0) c.handhole++;
+    /* a pad under a transformer is the utility's pad, not an EVSE base */
+    else if(t.indexOf('xfmr')>=0||t.indexOf('transformer')>=0) c.xfmrpad++;
+    else if(t.indexOf('pad')>=0)                      c.pad++;
+    else if(t.indexOf('meter')>=0)                    c.meter++;
+    else if(t.indexOf('panel')>=0||t.indexOf('mdp')>=0||t.indexOf('switchgear')>=0) c.panel++;
+    else if(t.indexOf('disco')>=0)                    c.disco++;
+    else if(t.indexOf('charger')>=0||t.indexOf('evse')>=0) c.charger++;
+  }
+  /* Whether the service is new is a drawing fact too: an existing meter bank
+     on the map means the service is there already. */
+  var existing=false;
+  for(i=0;i<els.length;i++){
+    var lbl=String((els[i]&&(els[i].label||els[i].name))||'').toLowerCase();
+    if(lbl.indexOf('existing')>=0 && (lbl.indexOf('meter')>=0||lbl.indexOf('service')>=0)) existing=true;
+  }
+  c.existingService = existing;
+  return c;
 }
 
 /* Pack whatever is on the canvas right now into one workbook payload. */
@@ -65219,6 +65380,8 @@ function _evPackSite(name){
     /* measured geometry — without this the workbook derives conduit from
        the trench and labels it DERIVED on the utility sheet */
     feet: _evFeetFromCanvas(),
+    /* placed equipment, so the sheet does not have to be told twice */
+    counts: _evCountsFromCanvas(),
     chargers: chargers,
     priceBasis: (typeof OMEGA_PRICE_BASIS!=='undefined') ? OMEGA_PRICE_BASIS : 'cost',
     evTotals: evT ? { ports:evT.ports, l2Units:evT.l2Units, dcfcUnits:evT.dcfcUnits,
@@ -110411,7 +110574,8 @@ var __OMEGA_clipper=(()=>{var Je=Object.defineProperty;var ms=Object.getOwnPrope
             BAND_A: 19, BAND_B: 20, CRIT: 21, CRIT_BOLD: 22,
             BAR_CRIT: 23, BAR_SOFT: 24, BAR_EMPTY: 25,
             NOTE: 26, WEEKNO: 27, MONTHHDR: 28,
-            CRIT_NUM: 29, CRIT_MONEY: 30, BAND_A_MONEY: 31, BAND_B_MONEY: 32 };
+            CRIT_NUM: 29, CRIT_MONEY: 30, BAND_A_MONEY: 31, BAND_B_MONEY: 32,
+            HAVE: 33, PARTIAL: 34, MISSING: 35 };
 
   /* Palette lifted from the reference workbook so the two are the same
      document, not two documents that look similar. */
@@ -110420,7 +110584,9 @@ var __OMEGA_clipper=(()=>{var Je=Object.defineProperty;var ms=Object.getOwnPrope
     KEYA: 'D6E4F0', KEYB: 'BDD7EE', VALA: 'EBF3FA', VALB: 'DDEEFF',
     BANDA: 'F2F2F2', BANDB: 'FFFFFF',
     CRIT: 'FFCCCC', BARCRIT: 'FF0000', BARSOFT: 'FF8C00',
-    NOTE: 'FFF2CC', WARN: 'FFEB9C'
+    NOTE: 'FFF2CC', WARN: 'FFEB9C',
+    /* readiness status: have / partial / missing */
+    HAVE: 'D9EAD3', PART: 'FFF2CC', MISS: 'F4CCCC'
   };
 
   function stylesXml(opts) {
@@ -110442,7 +110608,7 @@ var __OMEGA_clipper=(()=>{var Je=Object.defineProperty;var ms=Object.getOwnPrope
 /*6*/ '<font><b/><color rgb="FF' + C.NAVY + '"/><sz val="10"/><name val="Calibri"/></font>' +
 /*7*/ '<font><i/><sz val="9"/><name val="Calibri"/></font>' +
 '</fonts>' +
-'<fills count="14">' +
+'<fills count="16">' +
 '<fill><patternFill patternType="none"/></fill>' +
 '<fill><patternFill patternType="gray125"/></fill>' +
 '<fill><patternFill patternType="solid"><fgColor rgb="FF' + headerBg + '"/><bgColor indexed="64"/></patternFill></fill>' +
@@ -110457,6 +110623,8 @@ var __OMEGA_clipper=(()=>{var Je=Object.defineProperty;var ms=Object.getOwnPrope
 '<fill><patternFill patternType="solid"><fgColor rgb="FF' + C.BARCRIT + '"/><bgColor indexed="64"/></patternFill></fill>' +
 '<fill><patternFill patternType="solid"><fgColor rgb="FF' + C.BARSOFT + '"/><bgColor indexed="64"/></patternFill></fill>' +
 '<fill><patternFill patternType="solid"><fgColor rgb="FF' + C.NOTE + '"/><bgColor indexed="64"/></patternFill></fill>' +
+'<fill><patternFill patternType="solid"><fgColor rgb="FF' + C.HAVE + '"/><bgColor indexed="64"/></patternFill></fill>' +
+'<fill><patternFill patternType="solid"><fgColor rgb="FF' + C.MISS + '"/><bgColor indexed="64"/></patternFill></fill>' +
 '</fills>' +
 '<borders count="2">' +
 '<border><left/><right/><top/><bottom/><diagonal/></border>' +
@@ -110466,7 +110634,7 @@ var __OMEGA_clipper=(()=>{var Je=Object.defineProperty;var ms=Object.getOwnPrope
 '<bottom style="thin"><color rgb="FFD9D9D9"/></bottom><diagonal/></border>' +
 '</borders>' +
 '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-'<cellXfs count="33">' +
+'<cellXfs count="36">' +
 /* 0 normal   */ '<xf xfId="0" numFmtId="0" fontId="0" fillId="0" borderId="0"/>' +
 /* 1 header   */ '<xf xfId="0" numFmtId="0" fontId="1" fillId="2" borderId="1" applyFont="1" ' +
                  'applyFill="1" applyBorder="1" applyAlignment="1">' +
@@ -110512,6 +110680,9 @@ var __OMEGA_clipper=(()=>{var Je=Object.defineProperty;var ms=Object.getOwnPrope
 /*30 crit money */ '<xf xfId="0" numFmtId="165" fontId="0" fillId="10" borderId="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right"/></xf>' +
 /*31 bandA money*/ '<xf xfId="0" numFmtId="165" fontId="0" fillId="9" borderId="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right"/></xf>' +
 /*32 bandB money*/ '<xf xfId="0" numFmtId="165" fontId="0" fillId="0" borderId="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right"/></xf>' +
+/*33 have     */ '<xf xfId="0" numFmtId="0" fontId="2" fillId="14" borderId="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>' +
+/*34 partial  */ '<xf xfId="0" numFmtId="0" fontId="2" fillId="13" borderId="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>' +
+/*35 missing  */ '<xf xfId="0" numFmtId="0" fontId="2" fillId="15" borderId="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>' +
 '</cellXfs>' +
 '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
 '</styleSheet>';
@@ -110883,6 +111054,144 @@ SEL.split(', ').map(function (s) { return s + ' label, ' + s + ' td, ' + s + ' t
   window.OmegaScale = { pxPerFt: pxPerFt, mapPxPerFt: mapPxPerFt,
                         status: status, repair: repair, FALLBACK: FALLBACK };
 })();
+
+</script>
+<script id="omega-provenance-js">
+/* ====================================================================== *
+ *  OMEGA PROVENANCE                                                      *
+ *  ------------------------------------------------------------------    *
+ *  Every automatically-gathered fact carries where it came from, when it  *
+ *  was retrieved, and how long that is good for.                          *
+ *                                                                        *
+ *  WHY THIS COMES BEFORE ANY BOT.                                        *
+ *  A blank that reads "Confirm with AHJ" is honest: it sends somebody to  *
+ *  ring the planning department. The failure mode of an automated data    *
+ *  layer is replacing that blank with a CONFIDENT WRONG NUMBER — a fee    *
+ *  scraped from a 2019 PDF, a fire district that was consolidated last    *
+ *  year, a code edition superseded in the last adoption cycle. That is    *
+ *  worse than the blank, because nobody re-checks something the tool has  *
+ *  already answered.                                                     *
+ *                                                                        *
+ *  So a value is not a number here. It is a number PLUS its provenance,   *
+ *  and it EXPIRES. Past its shelf life it stops being an answer and goes  *
+ *  back to being a question, rather than going quietly stale.             *
+ * ====================================================================== */
+(function (root) {
+  'use strict';
+  if (root.OmegaProvenance) return;
+
+  /* How long each kind of fact stays trustworthy. These are review
+     intervals, not truths about the world: a fee schedule does not become
+     wrong at 12 months, it becomes UNVERIFIED, which is a different claim
+     and the only one the software is entitled to make. */
+  var SHELF_LIFE_DAYS = {
+    'jurisdiction': 3650,   /* boundaries move rarely, and by annexation */
+    'ahj-contact': 365,     /* staff turn over; numbers survive longer */
+    'code-adoption': 365,   /* adoption cycles run about three years */
+    'fee-schedule': 365,    /* most are adopted annually with the budget */
+    'cycle-time': 180,      /* queue-driven and genuinely volatile */
+    'moratorium': 30,       /* passes in one board meeting */
+    'precedent': 730,       /* an approved filing stays approved */
+    'utility-rule': 365
+  };
+
+  var CONFIDENCE = { VERIFIED: 'verified', PUBLISHED: 'published',
+                     DERIVED: 'derived', UNVERIFIED: 'unverified' };
+
+  function today() { return new Date(); }
+  function days(a, b) { return Math.floor((b - a) / 86400000); }
+
+  function parseDate(d) {
+    if (d instanceof Date) return d;
+    if (typeof d === 'number') return new Date(d);
+    if (typeof d === 'string') {
+      var t = Date.parse(d);
+      return isNaN(t) ? null : new Date(t);
+    }
+    return null;
+  }
+
+  /* Wrap a value with its provenance. A value with no source is REFUSED
+     rather than stored with a blank source, because a fact whose origin
+     nobody recorded is indistinguishable from one somebody invented. */
+  function fact(value, meta) {
+    meta = meta || {};
+    if (!meta.source) {
+      return { ok: false,
+        error: 'A fact needs a source. An unsourced value is indistinguishable ' +
+               'from an invented one, so it is refused rather than stored.' };
+    }
+    var kind = meta.kind || 'unverified';
+    var retrieved = parseDate(meta.retrieved) || today();
+    var shelf = meta.shelfLifeDays != null ? +meta.shelfLifeDays
+                                           : (SHELF_LIFE_DAYS[kind] || 365);
+    return { ok: true, value: value, source: meta.source, kind: kind,
+             url: meta.url || null,
+             retrieved: retrieved.toISOString().slice(0, 10),
+             shelfLifeDays: shelf,
+             confidence: meta.confidence || CONFIDENCE.PUBLISHED,
+             note: meta.note || null };
+  }
+
+  /* Is this fact still usable, and if not, why not. */
+  function status(f, asOf) {
+    if (!f || f.ok === false) return { ok: false, usable: false, reason: 'no fact' };
+    var when = parseDate(f.retrieved);
+    if (!when) return { ok: true, usable: false, reason: 'no retrieval date' };
+    var age = days(when, parseDate(asOf) || today());
+    var expired = age > f.shelfLifeDays;
+    return { ok: true, usable: !expired, ageDays: age, expired: expired,
+             shelfLifeDays: f.shelfLifeDays,
+             reason: expired
+               ? 'Retrieved ' + age + ' days ago against a ' + f.shelfLifeDays +
+                 ' day shelf life. It is not necessarily wrong \u2014 it is ' +
+                 'UNVERIFIED, which is a different claim and the only one this ' +
+                 'software can make. Re-check it before relying on it.'
+               : null };
+  }
+
+  /* The value, or null if it has expired. Never a stale number. */
+  function read(f, asOf) {
+    var st = status(f, asOf);
+    if (!st.ok || !st.usable) return null;
+    return f.value;
+  }
+
+  /* How the value should be presented: a verified figure and a scraped one
+     must not look alike on the page. */
+  function label(f, asOf) {
+    if (!f || f.ok === false) return 'Confirm with AHJ';
+    var st = status(f, asOf);
+    if (!st.usable) return 'Confirm with AHJ \u2014 last checked ' + f.retrieved;
+    if (f.confidence === CONFIDENCE.VERIFIED) return String(f.value);
+    return String(f.value) + '  (' + f.source + ', ' + f.retrieved + ')';
+  }
+
+  /* Everything that has gone stale, so a run can report it in one place
+     rather than making a reader notice twelve dates. */
+  function audit(bag, asOf) {
+    var stale = [], missing = [], live = [];
+    Object.keys(bag || {}).forEach(function (k) {
+      var f = bag[k];
+      if (!f || f.ok === false) { missing.push(k); return; }
+      var st = status(f, asOf);
+      (st.usable ? live : stale).push({
+        field: k, source: f.source, retrieved: f.retrieved,
+        ageDays: st.ageDays, shelfLifeDays: f.shelfLifeDays });
+    });
+    return { ok: true, live: live, stale: stale, missing: missing,
+      note: stale.length
+        ? stale.length + ' field(s) are past their shelf life and now read ' +
+          '"Confirm with AHJ" rather than showing a number nobody has ' +
+          're-checked.'
+        : null };
+  }
+
+  root.OmegaProvenance = {
+    SHELF_LIFE_DAYS: SHELF_LIFE_DAYS, CONFIDENCE: CONFIDENCE,
+    fact: fact, status: status, read: read, label: label, audit: audit
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
 
 </script>
 <script id="omega-arch-engine-js">
@@ -116631,7 +116940,137 @@ SEL.split(', ').map(function (s) { return s + ' label, ' + s + ' td, ' + s + ' t
                    'than critical load times hours divided by efficiency.' };
   }
 
+  /* ------------------------------------------------------------------ *
+   *  VERIFY A SIZING AGAINST AN HOURLY RUN                               *
+   *  ------------------------------------------------------------------ *
+   *  The sizer computes savings by assuming a shave depth is achieved in  *
+   *  every month, capped only by that month\u2019s average. It never asks      *
+   *  whether the battery had the STATE OF CHARGE to hold that depth       *
+   *  through the actual peak, or whether it could recharge before the     *
+   *  next one. On a site whose load sits high for twelve hours a day, it  *
+   *  cannot \u2014 and the claimed saving is then a number no meter will ever  *
+   *  show.                                                               *
+   *                                                                       *
+   *  A lender funding this asks for a figure that came from an hourly     *
+   *  run. So: rebuild the year, dispatch the proposed battery against it, *
+   *  and compare what was CLAIMED with what was ACHIEVED, month by month. *
+   *  Where they disagree, say so and say which is smaller.               *
+   * ------------------------------------------------------------------ */
+  function verifyShave(months, sized, opts) {
+    opts = opts || {};
+    if (!months || !months.length) {
+      return { ok: false, error: 'No monthly bills to rebuild a year from.' };
+    }
+    if (!sized || !(sized.shaveKw > 0)) {
+      return { ok: false, error: 'No sizing to verify.' };
+    }
+    var prof = profileFromMonthly(months, opts);
+    if (!prof.ok) return prof;
+
+    var sim = simulate({
+      hourlyLoadKw: prof.hourlyKw,
+      batteryKw: sized.shaveKw,
+      batteryKwh: sized.nameplateKwh,
+      rte: sized.rte == null ? 0.88 : sized.rte,
+      dod: sized.dod == null ? 0.90 : sized.dod,
+      eventHours: sized.eventHours,
+      onPeakFromHour: opts.onPeakFromHour,
+      onPeakToHour: opts.onPeakToHour
+    });
+    if (!sim.ok) return sim;
+
+    var achievedBy = {};
+    sim.peaks.forEach(function (p) { achievedBy[p.month] = p; });
+
+    var rows = [], claimedTotal = 0, achievedTotal = 0, short = 0;
+    (sized.perMonth || []).forEach(function (pm) {
+      var a = achievedBy[pm.month];
+      var claimedKw = pm.effectiveShaveKw != null ? pm.effectiveShaveKw : sized.shaveKw;
+      var achievedKw = a ? a.reductionKw : null;
+      var ratio = (achievedKw != null && claimedKw > 0)
+        ? +(achievedKw / claimedKw).toFixed(3) : null;
+      /* value the shortfall at the month\u2019s own $/kW, so it is money not kW */
+      var perKw = (pm.saved > 0 && claimedKw > 0) ? pm.saved / claimedKw : 0;
+      var achievedSaved = achievedKw != null ? +(achievedKw * perKw).toFixed(0) : null;
+      claimedTotal += pm.saved || 0;
+      if (achievedSaved != null) achievedTotal += achievedSaved;
+      if (ratio != null && ratio < 0.98) short++;
+      /* WHAT DRIVES THE GAP is how long the load sits above the ceiling.
+         A peak lasting two hours is easy for a four-hour battery; the same
+         kW sustained for twelve hours is not, and no amount of power
+         rating fixes an energy problem. Reporting the duration makes the
+         shortfall interrogable instead of merely asserted \u2014 and it is the
+         first thing to check against real interval data. */
+      var hrs = null, mIdx = pm.month - 1;
+      if (a) {
+        var above = 0, dayCount = 0, lastDay = -1;
+        for (var q = 0; q < prof.hourlyKw.length; q++) {
+          if (monthOfHour(q) !== mIdx) continue;
+          var d3 = Math.floor(q / 24);
+          if (d3 !== lastDay) { dayCount++; lastDay = d3; }
+          if (prof.hourlyKw[q] != null && prof.hourlyKw[q] > a.targetKw) above++;
+        }
+        hrs = dayCount ? +(above / dayCount).toFixed(1) : null;
+      }
+      rows.push({ month: pm.month, label: pm.label,
+                  claimedShaveKw: +claimedKw.toFixed(1),
+                  achievedShaveKw: achievedKw,
+                  ratio: ratio,
+                  claimedSaved: Math.round(pm.saved || 0),
+                  achievedSaved: achievedSaved,
+                  basePeakKw: a ? a.basePeakKw : null,
+                  shavedPeakKw: a ? a.shavedPeakKw : null,
+                  hoursAboveCeilingPerDay: hrs });
+    });
+
+    var extrap = sized.extrapolated;
+    var factor = extrap && (sized.perMonth || []).length
+      ? 12 / sized.perMonth.length : 1;
+    var claimedYr = Math.round(claimedTotal * factor);
+    var achievedYr = Math.round(achievedTotal * factor);
+    var gap = claimedYr - achievedYr;
+
+    return { ok: true, rows: rows,
+      claimedYr: claimedYr, achievedYr: achievedYr,
+      gapYr: gap, gapPct: claimedYr > 0 ? +(gap / claimedYr * 100).toFixed(1) : null,
+      monthsShort: short, simulation: sim, profile: prof,
+      /* Which number belongs in a model. Always the smaller one. */
+      bankable: Math.min(claimedYr, achievedYr),
+      verdict: gap <= 0
+        ? 'The hourly run achieves the claimed shave in every month. The sizing ' +
+          'is supported by simulation.'
+        : short + ' of ' + rows.length + ' month(s) fall short of the claimed ' +
+          'shave once state of charge is tracked hour by hour. The claimed ' +
+          '$' + claimedYr.toLocaleString() + '/yr becomes $' +
+          achievedYr.toLocaleString() + '/yr, a gap of $' + gap.toLocaleString() +
+          '. The simulated figure is the one to put in a model \u2014 it is the ' +
+          'one a meter can produce.',
+      driver: (function () {
+        var hs = rows.map(function (r) { return r.hoursAboveCeilingPerDay; })
+                     .filter(function (v) { return v != null; });
+        if (!hs.length) return null;
+        var avg = hs.reduce(function (a2, b) { return a2 + b; }, 0) / hs.length;
+        var eventH = sized.eventHours || 4;
+        return 'The load sits above the shave ceiling for about ' +
+          avg.toFixed(1) + ' hours a day, against a battery sized for ' + eventH +
+          ' hours. ' + (avg > eventH
+            ? 'That is the whole gap: the battery empties before the peak ends, ' +
+              'and more power rating cannot fix an energy shortfall. Either size ' +
+              'for the real event duration or accept the lower saving.'
+            : 'The battery has the energy to cover the event, so any shortfall ' +
+              'is a recharge-window problem rather than a capacity one.');
+      })(),
+      note: prof.synthesised
+        ? 'Run against a profile synthesised from ' + prof.monthsGiven +
+          ' monthly bill(s). Each month hits its own stated peak and total, so ' +
+          'the demand charge is right in aggregate \u2014 but the HOUR a peak lands ' +
+          'on is a shape, not a measurement. Interval data changes this answer ' +
+          'and is what a lender will ask for.'
+        : null };
+  }
+
   E.dispatch = {
+    verifyShave: verifyShave,
     HOURS: HOURS, DAYS_IN: DAYS_IN,
     monthOfHour: monthOfHour, hourOfDay: hourOfDay,
     profileFromMonthly: profileFromMonthly,
@@ -116995,6 +117434,231 @@ SEL.split(', ').map(function (s) { return s + ' label, ' + s + ' td, ' + s + ' t
     Z_CU: Z_CU, Z_AL: Z_AL, STEEL_X_MULT: STEEL_X_MULT,
     impedance: impedance, runZ: runZ, order: order,
     powerflow: powerflow, shortCircuit: shortCircuit, fromSiteGraph: fromSiteGraph
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script id="omega-arch-jurisdiction-js">
+/* ====================================================================== *
+ *  OMEGA JURISDICTION                                                    *
+ *  ------------------------------------------------------------------    *
+ *  Which authority actually has jurisdiction over this parcel.            *
+ *                                                                        *
+ *  A ZIPCODE CANNOT ANSWER THIS, AND THE ENGINE REFUSES TO PRETEND.      *
+ *  ZIP codes are USPS delivery routes. They cross city and county lines,  *
+ *  they do not nest inside them, and they are not polygons — they are     *
+ *  sets of delivery points that a vendor has drawn a hull around. A       *
+ *  mailing address of "Vista, CA 92081" can sit in UNINCORPORATED San     *
+ *  Diego County: a different planning department, a different fire        *
+ *  authority, a different ordinance and a different fee schedule from the *
+ *  City of Vista whose name is on the envelope.                           *
+ *                                                                        *
+ *  Get that wrong and every agency, fee and duration on the permitting    *
+ *  matrix is wrong while looking perfectly confident. So the only honest  *
+ *  input is a COORDINATE, tested against real boundaries.                 *
+ *                                                                        *
+ *  NO BOUNDARY DATA IS BUNDLED HERE. Layers are supplied by the caller    *
+ *  (Census TIGER place and county boundaries are authoritative and free), *
+ *  and with no layers the engine says it cannot answer rather than        *
+ *  guessing from the address string.                                      *
+ * ====================================================================== */
+(function (root) {
+  'use strict';
+  var E = root.OmegaArchEngine;
+  if (!E || E.jurisdiction) return;
+  var P = root.OmegaProvenance;
+
+  /* ------------------------------------------------------------------ *
+   *  POINT IN POLYGON  —  ray casting, with holes                        *
+   * ------------------------------------------------------------------ */
+  function inRing(pt, ring) {
+    var x = pt[0], y = pt[1], hit = false;
+    for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      var xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+      /* a vertex exactly on the ray is counted once, not twice */
+      var straddles = (yi > y) !== (yj > y);
+      if (straddles && x < (xj - xi) * (y - yi) / (yj - yi) + xi) hit = !hit;
+    }
+    return hit;
+  }
+
+  /* A polygon is [outerRing, hole, hole...]. An enclave — a city entirely
+     surrounded by county land, or county land inside a city — is a hole,
+     and ignoring holes puts the parcel in the wrong jurisdiction in exactly
+     the cases where it matters most. */
+  function inPolygon(pt, poly) {
+    if (!poly || !poly.length) return false;
+    if (!inRing(pt, poly[0])) return false;
+    for (var h = 1; h < poly.length; h++) {
+      if (inRing(pt, poly[h])) return false;
+    }
+    return true;
+  }
+
+  function inGeometry(pt, geom) {
+    if (!geom) return false;
+    if (geom.type === 'Polygon') return inPolygon(pt, geom.coordinates);
+    if (geom.type === 'MultiPolygon') {
+      for (var i = 0; i < geom.coordinates.length; i++) {
+        if (inPolygon(pt, geom.coordinates[i])) return true;
+      }
+    }
+    return false;
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  RESOLVE                                                            *
+   * ------------------------------------------------------------------ */
+  function refuseZip(z) {
+    return { ok: false, code: 'ZIP_IS_NOT_A_JURISDICTION',
+      error: 'A ZIP code cannot identify the authority having jurisdiction. ' +
+             'ZIP ' + z + ' is a USPS delivery route: it can cross city and ' +
+             'county lines, and a mailing address in one city can sit in ' +
+             'unincorporated county land with a different planning department, ' +
+             'fire authority, ordinance and fee schedule. Give a coordinate.' };
+  }
+
+  /* layers: { places: GeoJSON FeatureCollection, counties: ..., fire: ...,
+               air: ..., water: ... }
+     Each feature needs a name property; everything else is carried through. */
+  function resolve(input, layers, opts) {
+    opts = opts || {};
+    input = input || {};
+
+    if (input.zip && input.lat == null && input.lon == null) return refuseZip(input.zip);
+
+    var lat = +input.lat, lon = +input.lon;
+    if (!isFinite(lat) || !isFinite(lon)) {
+      return { ok: false, code: 'NO_POINT',
+        error: 'A coordinate is required. An address string is not a location ' +
+               'until it has been geocoded to a point, and a city name on an ' +
+               'envelope is not a jurisdiction.' };
+    }
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+      return { ok: false, code: 'BAD_POINT',
+        error: 'Latitude ' + lat + ', longitude ' + lon + ' is not on Earth. ' +
+               'Check the order \u2014 GeoJSON is [longitude, latitude], which is ' +
+               'the reverse of how a coordinate is usually spoken.' };
+    }
+    if (!layers || !Object.keys(layers).length) {
+      return { ok: false, code: 'NO_LAYERS',
+        error: 'No boundary layers supplied, so jurisdiction cannot be ' +
+               'determined. Census TIGER place and county boundaries are ' +
+               'authoritative and free. Nothing is guessed from the address.' };
+    }
+
+    var pt = [lon, lat];
+    var found = {}, unresolved = [];
+
+    Object.keys(layers).forEach(function (kind) {
+      var fc = layers[kind];
+      var feats = (fc && fc.features) || (Array.isArray(fc) ? fc : null);
+      if (!feats) { unresolved.push(kind); return; }
+      var hits = feats.filter(function (f) {
+        return inGeometry(pt, f.geometry);
+      });
+      if (!hits.length) { found[kind] = null; return; }
+      /* More than one hit on a layer that should be exclusive is a data
+         problem, not something to silently pick a winner from. */
+      found[kind] = { name: (hits[0].properties && (hits[0].properties.NAME ||
+                              hits[0].properties.name)) || null,
+                      properties: hits[0].properties || {},
+                      overlapping: hits.length > 1 ? hits.length : 0 };
+    });
+
+    /* An INCORPORATED PLACE takes precedence over the county for land use.
+       Outside every place, the county is the land-use authority — which is
+       exactly the case a city name on an envelope hides. */
+    var place = found.places, county = found.counties;
+    var incorporated = !!(place && place.name);
+    var landUse = incorporated ? place.name : (county && county.name) || null;
+
+    var warnings = [];
+    Object.keys(found).forEach(function (k) {
+      if (found[k] && found[k].overlapping) {
+        warnings.push('The ' + k + ' layer has ' + found[k].overlapping +
+          ' overlapping features at this point. That is a data problem; the ' +
+          'first was used and it may be the wrong one.');
+      }
+    });
+    if (!incorporated && county && county.name) {
+      warnings.push('This point is OUTSIDE every incorporated place, so ' +
+        county.name + ' County is the land-use authority \u2014 not whichever ' +
+        'city appears in the mailing address. Different department, ' +
+        'different ordinance, different fees.');
+    }
+    if (found.fire && found.fire.name && incorporated &&
+        found.fire.name !== place.name) {
+      warnings.push('Fire jurisdiction is ' + found.fire.name + ', which is not ' +
+        'the city. An independent fire district is a separate approval ' +
+        'authority and is frequently missed.');
+    }
+    unresolved.forEach(function (k) {
+      warnings.push('Layer "' + k + '" had no usable features and was skipped.');
+    });
+
+    var key = [ (county && county.name) || '?',
+                incorporated ? place.name : 'UNINCORPORATED' ].join('/');
+
+    var out = { ok: true, point: { lat: lat, lon: lon },
+      incorporated: incorporated, landUseAuthority: landUse,
+      place: place ? place.name : null,
+      county: county ? county.name : null,
+      fire: found.fire ? found.fire.name : null,
+      air: found.air ? found.air.name : null,
+      water: found.water ? found.water.name : null,
+      key: key, layers: found, warnings: warnings,
+      note: 'Resolved by point-in-polygon against the supplied boundaries, not ' +
+            'from the address string.' };
+
+    if (P && opts.source) {
+      out.provenance = P.fact(key, { source: opts.source, kind: 'jurisdiction',
+                                     url: opts.url,
+                                     confidence: P.CONFIDENCE.DERIVED,
+                                     note: 'Derived from boundary layers.' });
+    }
+    return out;
+  }
+
+  /* Turn a resolved jurisdiction into the fields the permitting matrix
+     keys off, so the two cannot drift apart. */
+  function toSite(res) {
+    if (!res || !res.ok) return { ok: false, error: (res && res.error) || 'unresolved' };
+    return { ok: true, site: {
+      state: res.layers && res.layers.counties && res.layers.counties.properties
+             ? (res.layers.counties.properties.STATE ||
+                res.layers.counties.properties.state || null) : null,
+      county: res.county,
+      city: res.incorporated ? res.place : null,
+      unincorporated: !res.incorporated,
+      fireAuthority: res.fire, airDistrict: res.air, waterAuthority: res.water
+    }, warnings: res.warnings };
+  }
+
+  /* A registry entry per resolved jurisdiction. Nothing is bundled: this is
+     the SHAPE an AHJ record has to have, so a gathered one can be checked
+     against it rather than trusted because it arrived. */
+  var AHJ_FIELDS = ['planning', 'building', 'fire', 'air', 'water', 'publicWorks'];
+  function validateAhjRecord(rec) {
+    var missing = [], unsourced = [];
+    AHJ_FIELDS.forEach(function (f) {
+      var v = rec && rec[f];
+      if (!v) { missing.push(f); return; }
+      if (P && (!v.source || (P.fact(v.value, v).ok === false))) unsourced.push(f);
+    });
+    return { ok: missing.length === 0 && unsourced.length === 0,
+      missing: missing, unsourced: unsourced,
+      note: unsourced.length
+        ? unsourced.length + ' field(s) carry no source. An AHJ contact without ' +
+          'a source and a date is how a consolidated fire district keeps ' +
+          'appearing on matrices years after it stopped existing.'
+        : null };
+  }
+
+  E.jurisdiction = {
+    resolve: resolve, toSite: toSite,
+    inPolygon: inPolygon, inGeometry: inGeometry, inRing: inRing,
+    AHJ_FIELDS: AHJ_FIELDS, validateAhjRecord: validateAhjRecord
   };
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -119961,6 +120625,41 @@ SEL.split(', ').map(function (s) { return s + ' label, ' + s + ' td, ' + s + ' t
   /* ------------------------------------------------------------------ *
    *  WHICH PERMITS APPLY                                                *
    * ------------------------------------------------------------------ */
+  /* If a jurisdiction has been resolved from a coordinate, it OVERRIDES the
+     typed city and county. A typed city is what the envelope says; a
+     resolved one is where the parcel actually is, and on unincorporated
+     land those are different authorities entirely. */
+  function fromJurisdiction(site, resolved) {
+    site = site || {};
+    if (!resolved || !resolved.ok) return { ok: false, site: site,
+      error: (resolved && resolved.error) || 'No resolved jurisdiction.' };
+    var out = {}; Object.keys(site).forEach(function (k) { out[k] = site[k]; });
+    var changed = [];
+    function set(k, v) {
+      if (v != null && String(out[k] || '') !== String(v)) {
+        if (out[k]) changed.push(k + ': "' + out[k] + '" \u2192 "' + v + '"');
+        out[k] = v;
+      }
+    }
+    set('county', resolved.county);
+    if (resolved.incorporated) set('city', resolved.place);
+    else if (out.city) {
+      changed.push('city: "' + out.city + '" \u2192 none. The parcel is ' +
+                   'unincorporated, so the county is the land-use authority.');
+      out.city = null;
+    }
+    out.unincorporated = !resolved.incorporated;
+    if (resolved.fire) out.fireAuthority = resolved.fire;
+    if (resolved.air) out.airDistrict = resolved.air;
+    return { ok: true, site: out, changed: changed,
+      warnings: resolved.warnings || [],
+      note: changed.length
+        ? 'The resolved jurisdiction disagreed with what was typed. The ' +
+          'coordinate wins: a city name on an envelope is a mailing route, ' +
+          'not an authority.'
+        : null };
+  }
+
   function applicable(site, opts) {
     site = site || {}; opts = opts || {};
     var found = findPack(site);
@@ -120528,7 +121227,319 @@ SEL.split(', ').map(function (s) { return s + ' label, ' + s + ' td, ' + s + ' t
                  ' MW, so local zoning is the path.' };
   }
 
+  /* ------------------------------------------------------------------ *
+   *  TWO REGISTERS  —  internal, and agency-facing                       *
+   *  ------------------------------------------------------------------  *
+   *  A permitting matrix is an AGENCY-FACING artifact. It goes to county
+   *  planning, the fire marshal, the air district and the utility, and in
+   *  most states everything sent to those bodies can be pulled by a third
+   *  party through a public-records request. Competitors, journalists and
+   *  opposing landowners read them.
+   *
+   *  The matrix as built carries the customer's name, the full system
+   *  capacity, and a fee range that is the applicant's cost basis. None of
+   *  that is required by any filing, and all of it is useful to somebody
+   *  who does not want the project to happen.
+   *
+   *  So there are two registers. INTERNAL is the full picture and never
+   *  leaves. AGENCY-FACING is scrubbed, and it is the default for anything
+   *  that could reach an agency or utility. When in doubt, produce to the
+   *  agency register.
+   *
+   *  Method from the open-records discipline in the data-centre site-plan
+   *  skill. The scrub there was a hand-written find/replace list for one
+   *  project; this generalises the RULES so a new project does not need a
+   *  new list \u2014 a list only scrubs what somebody remembered to add to it.
+   * ------------------------------------------------------------------ */
+  var SCRUB_RULES = [
+    { id: 'tenant', label: 'Customer / end-user identity',
+      why: 'A named offtaker tells a competitor who to approach and tells an ' +
+           'opponent who to organise against. No filing requires it.' },
+    { id: 'capacity', label: 'Capacity above the phase being filed',
+      why: 'An ultimate-buildout figure in an external document becomes the ' +
+           'number the community argues about, and it never comes back down ' +
+           'across drafts.' },
+    { id: 'financial', label: 'Fee totals, cost basis and financial terms',
+      why: 'Permit fees per agency are fine \u2014 that agency set them. A ' +
+           'project-wide cost basis is the applicant\u2019s commercial position.' },
+    { id: 'partners', label: 'JV, vendor and equipment partner names',
+      why: 'Names a competitor can call, and a supply chain an opponent can ' +
+           'pressure.' },
+    { id: 'internal', label: 'Internal posture and unresolved conflicts',
+      why: 'Notes written for a developer read very differently to a reviewer ' +
+           'deciding whether to trust the applicant.' }
+  ];
+
+  function scrub(m, cfg) {
+    cfg = cfg || {};
+    if (!m || !m.rows) return { ok: false, error: 'No matrix to scrub.' };
+    var removed = [];
+    function note(id, what) { removed.push({ rule: id, what: what }); }
+
+    var out = { rows: [], pack: m.pack, packSource: m.packSource,
+                unverified: m.unverified, essThresholdKwh: m.essThresholdKwh,
+                thresholdNote: m.thresholdNote, contacts: m.contacts,
+                exclusions: m.exclusions, register: 'agency-facing' };
+
+    m.rows.forEach(function (r) {
+      var c = {};
+      Object.keys(r).forEach(function (k) { c[k] = r[k]; });
+      /* fees per agency stay \u2014 that agency published them. The project
+         total does not, and it is removed on the cover rather than here. */
+      /* internal notes are written for a developer, not a reviewer */
+      if (c.note) { note('internal', r.id + ' note'); c.note = null; }
+      /* "what fired it on this project" exposes the system size row by row */
+      if (c.firedBy && c.firedBy.length) {
+        note('capacity', r.id + ' trigger detail');
+        c.firedBy = ['Per the submitted site plan'];
+      }
+      out.rows.push(c);
+    });
+
+    /* the cover facts */
+    var cover = {
+      projectName: cfg.projectName || 'Permitting Matrix',
+      customer: null, address: cfg.address || null,
+      systemLine: null, feeTotal: null
+    };
+    if (cfg.customer) { note('tenant', 'customer name'); }
+    if (cfg.systemLine) {
+      note('capacity', 'system capacity line');
+      cover.systemLine = 'Per the submitted application';
+    }
+    note('financial', 'project fee total');
+
+    return { ok: true, matrix: out, cover: cover, removed: removed,
+             rules: SCRUB_RULES,
+             stamp: 'AGENCY-FACING REGISTER \u2014 scrubbed for public-records ' +
+                    'disclosure. Customer identity, buildout capacity beyond the ' +
+                    'filed phase, and project cost basis are removed by design, ' +
+                    'not omitted by accident.',
+             gate: SCRUB_RULES.map(function (x) { return x.label; }) };
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  BASIS GATE                                                         *
+   *  How much of this matrix rests on something checked? A confident     *
+   *  package built on a thin base sends a developer to spend money on a  *
+   *  fiction, so the document reports its own footing rather than        *
+   *  reading the same either way.                                       *
+   * ------------------------------------------------------------------ */
+  function basis(m, rg) {
+    var checks = [];
+    checks.push({ id: 'jurisdiction', ok: !m.unverified,
+      label: 'Verified jurisdiction pack',
+      detail: m.unverified
+        ? 'No verified pack for this jurisdiction. Permits and code references ' +
+          'apply; agencies, fees and durations do not and read Confirm with AHJ.'
+        : 'Agencies, fees and durations from ' + (m.packSource || m.pack) + '.' });
+    var withDur = m.rows.filter(function (r) { return !!r.weeks; }).length;
+    checks.push({ id: 'durations', ok: withDur === m.rows.length,
+      label: 'Durations stated', 
+      detail: withDur + ' of ' + m.rows.length + ' permits carry a duration.' +
+        (withDur < m.rows.length
+          ? ' The programme total is a floor, not an estimate.' : '') });
+    var withFees = m.rows.filter(function (r) { return !!r.fees; }).length;
+    checks.push({ id: 'fees', ok: withFees === m.rows.length,
+      label: 'Fees stated',
+      detail: withFees + ' of ' + m.rows.length + ' permits carry a published fee.' });
+    var disc = m.rows.filter(function (r) { return r.discretionary; });
+    checks.push({ id: 'entitlement', ok: disc.length > 0,
+      label: 'Entitlement path identified',
+      detail: disc.length
+        ? disc.map(function (r) { return r.id; }).join(', ') +
+          ' \u2014 discretionary, with a hearing.'
+        : 'No discretionary approval on this matrix. For battery storage that ' +
+          'is unusual and worth confirming: it is an unlisted use in most ' +
+          'counties.' });
+    var passed = checks.filter(function (c) { return c.ok; }).length;
+    return { ok: true, checks: checks, passed: passed, total: checks.length,
+             provisional: passed < checks.length,
+             stamp: passed < checks.length
+               ? 'PROVISIONAL \u2014 built without ' +
+                 checks.filter(function (c) { return !c.ok; })
+                       .map(function (c) { return c.label.toLowerCase(); })
+                       .join(', ') + '.'
+               : 'All basis checks passed.' };
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  SUBMISSION READINESS  —  a different axis from "which permits"       *
+   *                                                                       *
+   *  The matrix answers WHAT is required. It never answered ARE WE READY   *
+   *  TO FILE, which is the question that decides whether a submission      *
+   *  comes back with comments or comes back rejected.                      *
+   *                                                                       *
+   *  The requirement list is precedent-driven rather than invented: these  *
+   *  are the items an industrial civil submission is repeatedly measured   *
+   *  against in a mature corridor, and each carries the reviewer comment   *
+   *  pattern that produced it. Status is have / partial / missing, and     *
+   *  the point of the sheet is the ACTION TO CLOSE column, not the status. *
+   *                                                                       *
+   *  Source: datacenter-site-plan-architect skill, AHJ submission          *
+   *  requirements, July 2026.                                             *
+   * ------------------------------------------------------------------ */
+  var READINESS = [
+    { no: 1, req: 'Spatially-accurate civil DWG, georeferenced',
+      why: 'Reviewers comment on this by name. A loose PDF is not a submission; ' +
+           'the CAD has to be in the right coordinate system and line up with ' +
+           'the county GIS.',
+      auto: 'dxf' },
+    { no: 2, req: 'NOI / NPDES construction stormwater evidence',
+      why: 'Notice of Intent, or the draft, plus the coverage path. Triggered by ' +
+           'disturbance over one acre.', permit: 'NPDES' },
+    { no: 3, req: 'Concrete washout location shown ON the plan',
+      why: 'Left as a contractor note it comes back as a comment every time. It ' +
+           'belongs on the ESPC sheet as a located item.' },
+    { no: 4, req: 'Utility general and specific note blocks',
+      why: 'The water and sewer authority\u2019s own standard notes, verbatim.' },
+    { no: 5, req: 'Water-line details \u2014 tap, gate valve, meter, backflow, DIP',
+      why: 'The most scrutinised sheet in an industrial filing. Meter size and ' +
+           'backflow size MUST match, backflow called out as RPCVA, restrained-' +
+           'joint DIP from the tap to the backflows, everything past the backflow ' +
+           'labelled private.' },
+    { no: 6, req: 'Fire access, fire line, hydrants and fire-flow',
+      why: 'Fire review lags the rest and needs coordinating early. Fire-lane ' +
+           'loop, apparatus turning, hydrant plan, fire-flow demand, FDC ' +
+           'locations, and access to the substation, generator and BESS yards.',
+      permit: 'FIRE_CONSTRUCTION' },
+    { no: 7, req: 'Detention and drainage calculations',
+      why: 'Pre and post runoff, detention sizing, water-quality treatment, ' +
+           'outfalls \u2014 sized for the full buildout, not the first phase.',
+      permit: 'STORMWATER' },
+    { no: 8, req: 'ESPC / erosion control plan',
+      why: 'Construction entrance, silt fence and inlet protection, limits of ' +
+           'disturbance, stockpiles, stabilisation schedule, SWPPP narrative, ' +
+           'laydown areas.', permit: 'NPDES' },
+    { no: 9, req: 'Utility tie-in details',
+      why: 'Water, sewer, storm, gas, fibre and electric connection details.' },
+    { no: 10, req: 'As-built commitment',
+      why: 'A stated commitment to provide record drawings. Cheap to include, ' +
+           'and a comment if it is missing.' },
+    { no: 11, req: 'Environmental constraint overlay',
+      why: 'Required even on a filing that is nominally "just a site plan".',
+      permit: 'HABITAT' },
+    { no: 12, req: 'GIS, address and parcel consistency',
+      why: 'The addresses, parcel IDs and the GIS base all have to agree with ' +
+           'one another. They frequently do not.', auto: 'geo' }
+  ];
+
+  /* Status is inferred where the drawing can answer it, and left BLANK where
+     it cannot. A readiness matrix that guesses "have" is worse than an empty
+     one, because it stops anyone checking. */
+  function readiness(m, opts) {
+    opts = opts || {};
+    var have = opts.have || {};
+    var keys = {};
+    (m && m.rows ? m.rows : []).forEach(function (r) { keys[r.key] = r.id; });
+    var rows = READINESS.map(function (x) {
+      var st = have[x.no] || null;
+      if (!st && x.permit && !keys[x.permit]) st = 'n/a';
+      return { no: x.no, requirement: x.req, why: x.why,
+               status: st, permitId: x.permit ? (keys[x.permit] || null) : null,
+               action: st === 'have' ? '' : null,
+               source: x.auto || null };
+    });
+    var counted = rows.filter(function (r) { return r.status !== 'n/a'; });
+    var known = counted.filter(function (r) { return r.status; });
+    return { ok: true, rows: rows,
+             total: counted.length, answered: known.length,
+             unanswered: counted.length - known.length,
+             note: known.length === 0
+               ? 'Nothing here has been assessed yet. Every row is blank on ' +
+                 'purpose \u2014 a readiness matrix that guesses "have" is worse ' +
+                 'than an empty one, because it stops anyone checking.'
+               : (counted.length - known.length) + ' of ' + counted.length +
+                 ' requirements have not been assessed.' };
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  OPEN RECORDS SCRUB                                                  *
+   *  Anything routed to an agency or a regulated utility can be pulled by *
+   *  a third party through a public-records request. Competitors,         *
+   *  journalists and opposing landowners read these. A permitting matrix  *
+   *  IS an agency-facing artifact, so it gets checked before it leaves.   *
+   * ------------------------------------------------------------------ */
+  var SCRUB = [
+    { id: 'TENANT', label: 'Tenant or end-user name',
+      test: /\b(hyperscal\w+|anchor tenant|end[- ]user is|tenant:)\b/i,
+      fix: 'Refer to "the end user", "the load" or "the campus".' },
+    { id: 'CAPITAL', label: 'Capital structure or financial terms',
+      test: /\b(capital stack|equity\s*\/\s*debt|IRR|cap rate|lease rate|\$\s*per\s*acre|purchase price|escalator)\b/i,
+      fix: 'No capital stack, lease economics or purchase price in an ' +
+           'agency-facing document.' },
+    { id: 'JV', label: 'Joint venture or equipment partner named',
+      test: /\b(joint venture with|JV partner|in partnership with)\b/i,
+      fix: 'No JV, vendor or financing partners by name.' },
+    { id: 'BUILDOUT', label: 'Ultimate buildout capacity above the public figure',
+      test: null,          /* numeric, handled below */
+      fix: 'Do not let an ultimate-buildout figure appear in an external ' +
+           'submission, and do not let the delivery figure creep upward ' +
+           'across drafts.' }
+  ];
+
+  function scrub_leak(sheets, opts) {
+    opts = opts || {};
+    var findings = [];
+    var publicMw = opts.publicMw;                /* the figure you have stated */
+    (sheets || []).forEach(function (sh) {
+      (sh.rows || []).forEach(function (row, ri) {
+        (row || []).forEach(function (cell, ci) {
+          var v = String(cell == null ? '' : cell);
+          if (!v) return;
+          SCRUB.forEach(function (rule) {
+            if (rule.test && rule.test.test(v)) {
+              findings.push({ rule: rule.id, label: rule.label, sheet: sh.name,
+                              row: ri + 1, col: ci + 1,
+                              text: v.slice(0, 90), fix: rule.fix });
+            }
+          });
+          if (publicMw > 0) {
+            var mm = v.match(/([\d,.]+)\s*MW\b/gi) || [];
+            mm.forEach(function (t) {
+              var num = parseFloat(String(t).replace(/[^\d.]/g, ''));
+              if (num > publicMw) {
+                findings.push({ rule: 'BUILDOUT',
+                  label: 'Capacity above the public figure',
+                  sheet: sh.name, row: ri + 1, col: ci + 1, text: v.slice(0, 90),
+                  fix: 'This document states ' + num + ' MW against a public ' +
+                       'figure of ' + publicMw + ' MW.' });
+              }
+            });
+          }
+        });
+      });
+    });
+    return { ok: true, clean: findings.length === 0, findings: findings,
+             checked: (sheets || []).length,
+             note: findings.length === 0
+               ? 'Nothing on the scrub list found. This is a keyword pass, not ' +
+                 'a substitute for reading the document \u2014 it cannot see a ' +
+                 'tenant identified by description rather than by name.'
+               : findings.length + ' item(s) to review before this leaves for an ' +
+                 'agency. Anything routed to an agency or a regulated utility can ' +
+                 'be pulled by a public-records request.' };
+  }
+
+  /* One READINESS list and one readiness(). A second pair was added here
+     with an incompatible signature — readiness(status) against the
+     existing readiness(matrix, opts) — and shadowed the original, so the
+     report passed a matrix where a status map was expected and every row
+     came back blank. The original is the better one: it ties each
+     requirement to the permit that triggers it and marks a row n/a when
+     that permit is not on this project. */
   E.permit = {
+    fromJurisdiction: fromJurisdiction,
+    READINESS: READINESS, readiness: readiness,
+    /* NOT `scrub`. This engine already HAS a scrub(m, cfg) that removes
+       sensitive content from the matrix and returns a scrubbed copy, and
+       naming this one the same silently discarded it — a duplicate key in
+       an object literal loses to the later one, with no error anywhere.
+       The two do different jobs and both are worth having: scrub() strips
+       KNOWN FIELDS, leakScan() reads the finished sheets as text and catches
+       what someone typed into a project name. */
+    LEAK_RULES: SCRUB, leakScan: scrub_leak,
+    SCRUB_RULES: SCRUB_RULES, scrub: scrub, basis: basis,
     STRUCTURAL_RISKS: STRUCTURAL_RISKS, structuralRisks: structuralRisks,
     STATE_SITING: STATE_SITING, sitingPath: sitingPath,
     DISCRETIONARY: DISCRETIONARY, MINISTERIAL: MINISTERIAL,
@@ -120536,6 +121547,233 @@ SEL.split(', ').map(function (s) { return s + ' label, ' + s + ' td, ' + s + ' t
     findPack: findPack, applicable: applicable,
     schedule: schedule, range: range, audit: audit, risks: risks, fromSite: fromSite
   };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script id="omega-arch-solartrace-js">
+/* ====================================================================== *
+ *  OMEGA SOLARTRACE ADAPTER                                              *
+ *  ------------------------------------------------------------------    *
+ *  NREL's SolarTRACE publishes median permitting, inspection and          *
+ *  interconnection cycle times by authority having jurisdiction and by    *
+ *  utility, from timestamped project data supplied by installers.         *
+ *                                                                        *
+ *  ITS SCOPE IS RESIDENTIAL AND SMALL COMMERCIAL PV UP TO 20 kW.         *
+ *  That is the whole reason this module is mostly a gate. A 1 MW BESS is  *
+ *  fifty times the ceiling of the dataset and goes through an entirely    *
+ *  different process — a discretionary use permit before a hearing board, *
+ *  an NFPA 855 fire review, an interconnection study. SolarTRACE measures *
+ *  none of that. It measures rooftop permit review and residential        *
+ *  interconnection.                                                      *
+ *                                                                        *
+ *  So the TIMELINES are refused outside the dataset's scope rather than   *
+ *  scaled, extrapolated, or quietly applied. Filling a blank duration     *
+ *  with a number from the wrong population is worse than leaving it       *
+ *  blank, because a blank sends somebody to ring the AHJ and a number     *
+ *  does not.                                                             *
+ *                                                                        *
+ *  WHAT DOES TRANSFER is the AHJ's own attributes, which are properties   *
+ *  of the office rather than of the project: whether it takes online      *
+ *  submissions, whether it has adopted SolarAPP+, its published           *
+ *  requirements list, and whether it has processed any solar or storage   *
+ *  work at all. That last one is the fatal-flaw question — an AHJ that    *
+ *  has never seen an energy storage application is a schedule risk        *
+ *  whatever the median says.                                             *
+ * ====================================================================== */
+(function (root) {
+  'use strict';
+  var E = root.OmegaArchEngine;
+  if (!E || E.solartrace) return;
+  var P = root.OmegaProvenance;
+
+  var SCOPE = {
+    maxKwDc: 20,
+    sectors: ['residential', 'small commercial'],
+    what: 'residential and small commercial PV, and PV plus storage, up to 20 kW'
+  };
+  var SOURCE = 'NREL SolarTRACE';
+  var URL = 'https://data.nrel.gov/submissions/160';
+
+  /* Is this project inside the population the medians were computed from? */
+  function inScope(site) {
+    site = site || {};
+    var pv = +site.solarKwDc || 0;
+    var bess = +site.bessKw || 0;
+    var gen = +site.gensetKw || 0;
+    var reasons = [];
+    if (gen > 0) reasons.push('the project includes combustion generation, which ' +
+      'is outside the dataset entirely');
+    if (pv > SCOPE.maxKwDc) reasons.push(pv.toLocaleString() + ' kWdc of PV against a ' +
+      SCOPE.maxKwDc + ' kW ceiling');
+    if (bess > SCOPE.maxKwDc) reasons.push(bess.toLocaleString() + ' kW of storage ' +
+      'against a ' + SCOPE.maxKwDc + ' kW ceiling');
+    if (!pv && !bess) reasons.push('no PV or storage on the site');
+    return { ok: reasons.length === 0, reasons: reasons, scope: SCOPE.what };
+  }
+
+  /* Normalise a row from the published dataset. Field names vary between
+     releases, so several spellings are accepted and anything unrecognised
+     is reported rather than dropped. */
+  function parseRow(row) {
+    if (!row || typeof row !== 'object') return { ok: false, error: 'not a row' };
+    function pick() {
+      for (var i = 0; i < arguments.length; i++) {
+        var k = arguments[i];
+        if (row[k] != null && row[k] !== '') return row[k];
+      }
+      return null;
+    }
+    var num = function (v) { var n = parseFloat(v); return isFinite(n) ? n : null; };
+    var ahj = pick('ahj', 'AHJ', 'ahj_name', 'authority');
+    if (!ahj) return { ok: false, error: 'row has no AHJ name' };
+    return { ok: true,
+      ahj: String(ahj),
+      state: pick('state', 'State', 'st'),
+      utility: pick('utility', 'Utility', 'utility_name'),
+      year: num(pick('year', 'Year', 'data_year')),
+      projects: num(pick('projects', 'project_count', 'n', 'count')),
+      permitDays: num(pick('median_permit_days', 'permit_days',
+                           'submit_to_approve_days')),
+      inspectionDays: num(pick('median_inspection_days', 'inspection_days')),
+      interconnectDays: num(pick('median_interconnection_days',
+                                 'interconnection_days', 'pto_days')),
+      onlineSubmission: pick('online_submission', 'online', 'accepts_online'),
+      solarApp: pick('solarapp', 'solarapp_plus', 'SolarAPP'),
+      requirements: pick('requirements', 'permitting_requirements') };
+  }
+
+  function parse(rows) {
+    if (!Array.isArray(rows)) return { ok: false, error: 'Expected an array of rows.' };
+    var out = [], bad = [];
+    rows.forEach(function (r, i) {
+      var p = parseRow(r);
+      if (p.ok) out.push(p); else bad.push({ index: i, why: p.error });
+    });
+    return { ok: true, rows: out, rejected: bad,
+      note: bad.length ? bad.length + ' row(s) could not be read and were listed, ' +
+                         'not dropped silently.' : null };
+  }
+
+  /* Look an AHJ up. Timelines come back only if the project is in scope. */
+  function lookup(rows, ahjName, site, opts) {
+    opts = opts || {};
+    if (!Array.isArray(rows) || !rows.length) {
+      return { ok: false, error: 'No SolarTRACE data loaded.' };
+    }
+    if (!ahjName) {
+      return { ok: false, error: 'An AHJ name is required. Resolve the jurisdiction ' +
+        'from a coordinate first \u2014 a city on an envelope is not an AHJ.' };
+    }
+    var want = String(ahjName).trim().toLowerCase();
+    var hits = rows.filter(function (r) {
+      return String(r.ahj).trim().toLowerCase() === want;
+    });
+    if (!hits.length) {
+      return { ok: true, found: false, ahj: ahjName,
+        note: 'This AHJ is not in SolarTRACE. The dataset only lists authorities ' +
+              'with at least ten permitted projects a year from participating ' +
+              'installers, so absence means no reported volume \u2014 not that the ' +
+              'AHJ is slow, fast, or hostile. It is silence, not evidence.' };
+    }
+    /* most recent year wins */
+    hits.sort(function (a, b) { return (b.year || 0) - (a.year || 0); });
+    var top = hits[0];
+
+    var scope = inScope(site);
+    var out = { ok: true, found: true, ahj: top.ahj, state: top.state,
+      year: top.year, projects: top.projects,
+      /* ATTRIBUTES OF THE OFFICE — these do not depend on project size */
+      attributes: {
+        onlineSubmission: top.onlineSubmission,
+        solarApp: top.solarApp,
+        requirements: top.requirements,
+        hasProcessedSolar: true
+      },
+      inScope: scope.ok, scopeReasons: scope.reasons, scopeIs: SCOPE.what };
+
+    if (scope.ok) {
+      out.timelines = { permitDays: top.permitDays,
+                        inspectionDays: top.inspectionDays,
+                        interconnectDays: top.interconnectDays };
+      if (P) {
+        out.provenance = P.fact(out.timelines, {
+          source: SOURCE, url: URL, kind: 'cycle-time',
+          retrieved: opts.retrieved,
+          confidence: P.CONFIDENCE.PUBLISHED,
+          note: 'Median across ' + (top.projects || '?') + ' reported projects in ' +
+                (top.year || 'an unstated year') + '.' });
+      }
+    } else {
+      out.timelines = null;
+      out.refusal = 'Timelines withheld. SolarTRACE covers ' + SCOPE.what + ', and ' +
+        'this project is outside it: ' + scope.reasons.join('; ') + '. The medians ' +
+        'describe rooftop permit review and residential interconnection, not a ' +
+        'discretionary use permit, an NFPA 855 fire review or an interconnection ' +
+        'study. Applying them here would put a confident number on a blank that ' +
+        'should send somebody to ring the AHJ.';
+    }
+    return out;
+  }
+
+  /* The fatal-flaw signal: has this office ever processed solar or storage?
+     Distinct from "is it fast", and useful at any project size. */
+  function familiarity(rows, ahjName) {
+    if (!Array.isArray(rows)) return { ok: false, error: 'No SolarTRACE data loaded.' };
+    var want = String(ahjName || '').trim().toLowerCase();
+    var hits = rows.filter(function (r) {
+      return String(r.ahj).trim().toLowerCase() === want;
+    });
+    var total = hits.reduce(function (a, r) { return a + (r.projects || 0); }, 0);
+    return { ok: true, ahj: ahjName, found: hits.length > 0,
+      reportedProjects: total, years: hits.map(function (r) { return r.year; }),
+      signal: hits.length
+        ? 'This AHJ has processed reported solar volume, so the office has seen ' +
+          'a photovoltaic application before. That says nothing about whether it ' +
+          'has seen ENERGY STORAGE, which is the question that matters for a BESS ' +
+          '\u2014 and nothing about the fire marshal, who reviews separately.'
+        : 'Not in SolarTRACE. The dataset needs ten reported projects a year to ' +
+          'list an AHJ, so this may be a low-volume office or simply one no ' +
+          'participating installer works in. Either way there is no evidence here ' +
+          'that it has reviewed a solar or storage application, which is itself ' +
+          'worth knowing before a land option is signed.' };
+  }
+
+  /* Only ever fills permits that are actually in the dataset's scope. */
+  function applyTo(matrix, look) {
+    if (!matrix || !matrix.rows) return { ok: false, error: 'No matrix.' };
+    if (!look || !look.ok || !look.found) {
+      return { ok: true, filled: [], skipped: [],
+               note: 'Nothing to apply.' };
+    }
+    if (!look.inScope) {
+      return { ok: true, filled: [], skipped: matrix.rows.map(function (r) { return r.id; }),
+        note: look.refusal };
+    }
+    var filled = [];
+    matrix.rows.forEach(function (r) {
+      if (r.weeks) return;                       /* never overwrite a real figure */
+      var d = null;
+      if (r.key === 'ELECTRICAL' || r.key === 'BUILDING') d = look.timelines.permitDays;
+      else if (r.key === 'FINAL_INSPECTION') d = look.timelines.inspectionDays;
+      else if (r.key === 'INTERCONNECTION') d = look.timelines.interconnectDays;
+      if (d > 0) {
+        var wk = +(d / 7).toFixed(1);
+        r.weeks = [wk, wk];
+        r.weeksSource = SOURCE;
+        filled.push({ id: r.id, key: r.key, weeks: wk });
+      }
+    });
+    return { ok: true, filled: filled,
+      note: filled.length
+        ? filled.length + ' duration(s) filled from ' + SOURCE + ' medians. They ' +
+          'are marked with their source so they do not read as verified local ' +
+          'figures.'
+        : 'No durations filled: every permit in scope already had a figure.' };
+  }
+
+  E.solartrace = { SCOPE: SCOPE, SOURCE: SOURCE, URL: URL,
+                   inScope: inScope, parse: parse, parseRow: parseRow,
+                   lookup: lookup, familiarity: familiarity, applyTo: applyTo };
 })(typeof window !== 'undefined' ? window : globalThis);
 
 </script>
@@ -126782,6 +128020,7 @@ challengeRow(s) +
    *             gasTherms, gasCost }]
    * ------------------------------------------------------------------ */
   function build(cfg) {
+    var res_verify = null;
     cfg = cfg || {};
     var t = T();
     if (!t) return { ok: false, error: 'Tariff engine not loaded.' };
@@ -127016,6 +128255,43 @@ challengeRow(s) +
     var peaks = months.map(function (m) { return +(m.peaks && m.peaks.any) || 0; });
     var obsPeak = Math.max.apply(null, peaks);
 
+    /* ---- Dispatch Verification ----
+       The sizing sheet above is an ALLOCATION: it assumes the shave depth
+       is achieved every month, capped only by that month's average. This
+       sheet dispatches the proposed battery hour by hour on ONE state of
+       charge and reports what it actually achieves. A lender funds the
+       second number, not the first. */
+    if (sized && E().dispatch && E().dispatch.verifyShave) {
+      var ver = E().dispatch.verifyShave(months, sized, cfg || {});
+      if (ver.ok) {
+        var vRows = [['Month', 'Base peak kW', 'Shaved peak kW',
+                      'Claimed shave kW', 'Achieved shave kW', 'Achieved %',
+                      'Claimed $', 'Simulated $', 'Hrs/day above ceiling']];
+        ver.rows.forEach(function (vr) {
+          vRows.push([vr.label || vr.month, vr.basePeakKw, vr.shavedPeakKw,
+                      vr.claimedShaveKw, vr.achievedShaveKw,
+                      vr.ratio != null ? Math.round(vr.ratio * 100) + '%' : '',
+                      vr.claimedSaved, vr.achievedSaved,
+                      vr.hoursAboveCeilingPerDay]);
+        });
+        vRows.push([]);
+        vRows.push(['Claimed, annualised', '', '', '', '', '', ver.claimedYr]);
+        vRows.push(['Simulated, annualised', '', '', '', '', '', '', ver.achievedYr]);
+        vRows.push(['BANKABLE FIGURE', '', '', '', '', '', '', ver.bankable,
+                    'the smaller of the two']);
+        vRows.push([]);
+        vRows.push([ver.verdict]);
+        if (ver.driver) vRows.push([ver.driver]);
+        if (ver.note) vRows.push([ver.note]);
+        vRows.push(['Method: ' + ((ver.simulation && ver.simulation.hours) || '?') +
+                    ' hourly steps on ONE state of charge, so the battery cannot ' +
+                    'do two things at once. Equivalent cycles: ' +
+                    ((ver.simulation && ver.simulation.equivalentCycles) || '?') + '.']);
+        sheets.push({ name: 'Dispatch Verification', rows: vRows });
+        res_verify = ver;
+      }
+    }
+
     var gRows = [['Parameter', 'Value', 'Basis']];
     gRows.push(['Average daily electric load', n0(avgDaily) + ' kWh/day', 'bills']);
     gRows.push(['Average power draw', n2(avgKw) + ' kW', 'daily kWh / 24']);
@@ -127065,7 +128341,7 @@ challengeRow(s) +
       'not energy arbitrage.']);
     sheets.push({ name: 'Design Parameters', rows: gRows });
 
-    return { ok: true, sheets: sheets, tariff: tariff, sweep: sw, sized: sized,
+    return { ok: true, verify: res_verify, sheets: sheets, tariff: tariff, sweep: sw, sized: sized,
              totals: { kwh: totKwh, days: totDays, demandYr: annualDemand / months.length * 12,
                        electricYr: (sumD + sumG) / months.length * 12,
                        billYr: (sumD + sumG + sumGas) / months.length * 12 } };
@@ -127177,6 +128453,17 @@ challengeRow(s) +
   }
   function wk(r) { return r ? r[0] + '\u2013' + r[1] : 'Confirm with AHJ'; }
 
+  /* Anything that could reach an agency or a utility defaults to the
+     scrubbed register. The caller opts INTO the internal one. */
+  function applyRegister(m, cfg) {
+    if (!cfg || !cfg.agencyFacing) return { m: m, stamp: null, removed: [] };
+    var P = E().permit;
+    if (!P.scrub) return { m: m, stamp: null, removed: [] };
+    var sc = P.scrub(m, cfg);
+    if (!sc.ok) return { m: m, stamp: null, removed: [] };
+    return { m: sc.matrix, stamp: sc.stamp, removed: sc.removed, cover: sc.cover };
+  }
+
   function build(cfg) {
     cfg = cfg || {};
     var P = E() && E().permit;
@@ -127184,6 +128471,9 @@ challengeRow(s) +
     var site = cfg.site;
     if (!site) return { ok: false, error: 'No site given. The matrix is derived from what is drawn.' };
     var m = P.applicable(site, cfg);
+    var reg = applyRegister(m, cfg);
+    var scrubStamp = reg.stamp, scrubRemoved = reg.removed;
+    m = reg.m;
     if (!m.rows.length) {
       return { ok: false, error: 'Nothing on the site triggers a permit yet. Place the ' +
                'battery, generation or charging equipment first.' };
@@ -127192,7 +128482,7 @@ challengeRow(s) +
     var hi = rg.high, lo = rg.low;
     var byId = {}; hi.tasks.forEach(function (t) { byId[t.id] = t; });
     var rk = P.risks(m.rows);
-    var sheets = [];
+    var sheets = [], res_scrub = null, rd = null;
 
     /* ---- Cover ----
        Was 33 rows, most of it prose in column A. A cover is read in ten
@@ -127447,7 +128737,54 @@ challengeRow(s) +
     }
     sheets.push({ name: 'Agency Contacts', rows: ct });
 
-    return { ok: true, matrix: m, range: rg, site: site, sheets: sheets, matrix: m, range: rg, risks: rk };
+    /* ---- Submission readiness ----
+       A different axis from "which permits are required": are we ready to
+       FILE. The point of the sheet is the Action to Close column. */
+    rd = E().permit.readiness ? E().permit.readiness(m, cfg && cfg.readiness) : null;
+    if (rd) {
+      var rr2 = [['#', 'Requirement', 'Status', 'Action to Close', 'Precedent / Ref',
+                  'Why it is on this list', 'Related permit']];
+      rd.rows.forEach(function (x) {
+        rr2.push([x.no, x.requirement, x.status || '', x.action || '', '',
+                  x.why, x.permitId || '']);
+      });
+      rr2.push([]);
+      rr2.push([rd.note]);
+      rr2.push(['Status is have / partial / missing. Rows are blank where the ' +
+                'drawing cannot answer them \u2014 filling one in as "have" ' +
+                'without checking is how a submission comes back rejected ' +
+                'rather than commented.']);
+      sheets.push({ name: 'Submission Readiness', rows: rr2 });
+    }
+
+    /* ---- Open records gate ----
+       This workbook is an agency-facing artifact and can be pulled through a
+       public-records request. Check it before it leaves. */
+    res_scrub = E().permit.leakScan
+      ? E().permit.leakScan(sheets, { publicMw: cfg && cfg.publicMw }) : null;
+    if (res_scrub) {
+      var sr = [['Rule', 'What was found', 'Sheet', 'Cell', 'Text', 'What to do']];
+      res_scrub.findings.forEach(function (f) {
+        sr.push([f.rule, f.label, f.sheet, 'R' + f.row + 'C' + f.col, f.text, f.fix]);
+      });
+      if (!res_scrub.findings.length) {
+        sr.push(['\u2014', 'Nothing on the scrub list found', '', '', '', '']);
+      }
+      sr.push([]);
+      sr.push([res_scrub.note]);
+      sr.push(['Anything routed to a government agency or a regulated utility ' +
+               'can be pulled by a third party through a public-records request. ' +
+               'Competitors, journalists and opposing landowners read these. ' +
+               'Keep two registers: the internal one with the full picture, and ' +
+               'this agency-facing one.']);
+      sheets.push({ name: 'Open Records Check', rows: sr });
+    }
+
+    return { ok: true, matrix: m, range: rg, site: site,
+             basis: E().permit.basis ? E().permit.basis(m, rg) : null,
+             scrubStamp: scrubStamp, scrubRemoved: scrubRemoved,
+             readiness: rd, leakScan: res_scrub,
+             sheets: sheets, risks: rk };
   }
 
   function toCSV(res) {
@@ -127488,8 +128825,16 @@ challengeRow(s) +
     var byId = {}; ((rg.high && rg.high.tasks) || []).forEach(function (t) { byId[t.id] = t; });
     var out = [];
     var title = (cfg && cfg.projectName) || 'Permitting Matrix';
-    var sub = [cfg && cfg.customer, cfg && cfg.address, site.utility]
+    /* THE SUB BAR IS THE LEAK. The scrub cleared the customer out of the
+       matrix rows and the cover facts, and then this rebuilt it straight
+       from cfg \u2014 so the name a public-records request would pull was
+       printed across the top of every sheet. A scrub that only reaches the
+       body of a document has not scrubbed the document. */
+    var agency = !!(cfg && cfg.agencyFacing);
+    var sub = [agency ? null : (cfg && cfg.customer),
+               cfg && cfg.address, site.utility]
                 .filter(Boolean).join('  |  ');
+    if (agency && !sub) sub = 'Agency-facing register';
 
     /* Put the title and sub bar on top of a built sheet, shifting every
        style, merge and height that was indexed before they existed. */
@@ -127541,8 +128886,10 @@ challengeRow(s) +
 
       section('PROJECT SUMMARY');
       kv('Project Name', title);
-      kv('Customer', (cfg && cfg.customer) || '\u2014');
-      kv('System', sysBits || 'Nothing placed');
+      kv('Customer', agency ? 'Withheld \u2014 agency-facing register'
+                            : ((cfg && cfg.customer) || '\u2014'));
+      kv('System', agency ? 'Per the submitted application'
+                          : (sysBits || 'Nothing placed'));
       kv('Location', [site.city, site.state, site.county ? '(' + site.county + ')' : null]
                        .filter(Boolean).join(', ') || '\u2014');
       kv('Utility', site.utility || '\u2014');
@@ -127550,7 +128897,9 @@ challengeRow(s) +
       kv('Total Permitting Duration', rg.lowWeeks + '\u2013' + rg.highWeeks + ' weeks' +
         (rg.totalIsFloor ? '   (a floor \u2014 ' + rg.unknownDurations.length +
                            ' permit(s) carry no duration)' : ''));
-      kv('Total Estimated Permit Fees', unk === m.rows.length ? 'Confirm with AHJ'
+      kv('Total Estimated Permit Fees', agency
+        ? 'Per-agency fees are listed on the Fee Summary sheet'
+        : unk === m.rows.length ? 'Confirm with AHJ'
         : '$' + lo.toLocaleString() + '\u2013$' + hi.toLocaleString() +
           (unk ? '   (excludes ' + unk + ' with no published fee)' : '') +
           '   \u2014 excludes utility grid upgrade costs');
@@ -127558,6 +128907,36 @@ challengeRow(s) +
       kv('Date Prepared', new Date().toLocaleDateString('en-US',
           { month: 'long', year: 'numeric' }));
       gap();
+
+      /* The document reports its own footing. A confident package built on a
+         thin base sends somebody to spend money on a fiction. */
+      var bs = E().permit.basis ? E().permit.basis(m, rg) : null;
+      if (bs) {
+        section('BASIS OF THIS MATRIX  \u2014  ' + bs.passed + ' of ' + bs.total +
+                ' checks passed');
+        bs.checks.forEach(function (c) {
+          var detail = c.detail;
+          /* The jurisdiction check quotes its SOURCE, and a source is a
+             document title that can carry a customer name straight through
+             a scrub that only looked at the fields it expected. Scrubbing
+             the fields you thought of is not scrubbing. */
+          if (agency && cfg && cfg.customer) {
+            detail = String(detail).split(cfg.customer).join('the applicant');
+          }
+          kv((c.ok ? '\u2713  ' : '\u2715  ') + c.label, detail);
+        });
+        if (bs.provisional) {
+          rows.push([bs.stamp]); st[r] = { 0: S.NOTE };
+          mg.push('A' + (r + 1) + ':' + X.colName(W - 1) + (r + 1)); ht[r] = 26; r++;
+        }
+        gap();
+      }
+      if (cfg && cfg.agencyFacing) {
+        section('REGISTER');
+        kv('AGENCY-FACING', (res.scrubStamp || '') + ' Keep the internal register ' +
+           'for anything that stays inside the company.');
+        gap();
+      }
 
       section('REVIEW TYPE LEGEND');
       kv('DISCRETIONARY', 'A judgment call. Public notice, a hearing, and a vote that ' +
@@ -127693,6 +129072,22 @@ challengeRow(s) +
         styles: st, merges: mg, rowHeights: ht, colWidths: cw, freeze: 'C5' }, W));
     })();
 
+    /* FINAL SWEEP. Everything above scrubs a field it knew about. This
+       catches the ones it did not \u2014 a pack name, a source title, a note
+       somebody adds next year. A scrub that trusts its own completeness is
+       the one that leaks. */
+    if (agency && cfg && cfg.customer) {
+      var needle = String(cfg.customer);
+      out.forEach(function (sh) {
+        sh.rows = sh.rows.map(function (row) {
+          return (row || []).map(function (cell) {
+            return (typeof cell === 'string' && cell.indexOf(needle) > -1)
+              ? cell.split(needle).join('the applicant') : cell;
+          });
+        });
+      });
+    }
+
     return out;
   }
 
@@ -127720,6 +129115,22 @@ challengeRow(s) +
         out.colWidths = hdr.map(function (h, i) { return i < 7 ? null : 4; });
       }
       if (sh.name === 'Cover') out.colWidths = [30, 78];
+      /* Traffic-light the readiness status. A readiness matrix read as plain
+         text is a list, not a status. An UNANSWERED row is left uncoloured
+         on purpose: colouring it red would say "we checked and it is
+         missing" when nobody has looked at it yet. */
+      if (sh.name === 'Submission Readiness' && X) {
+        out.colWidths = [6, 40, 11, 40, 20, 46, 12];
+        var st2 = {};
+        sh.rows.forEach(function (r2, i2) {
+          if (i2 === 0) return;
+          var v = String((r2 || [])[2] || '').toLowerCase();
+          if (v === 'have') st2[i2] = { 2: X.STYLE.HAVE };
+          else if (v === 'partial') st2[i2] = { 2: X.STYLE.PARTIAL };
+          else if (v === 'missing') st2[i2] = { 2: X.STYLE.MISSING };
+        });
+        out.styles = st2;
+      }
       return out;
     });
   }
@@ -127887,6 +129298,10 @@ challengeRow(s) +
            'blank and the permits still appear with their triggers and code references, ' +
            'marked for confirmation with the AHJ.') +
       field('omega-pm-name', 'Project name', (window.S && window.S.projectName) || '') +
+      /* The cover's sub bar reads "Customer | Address | Utility". Without a
+         customer field the dialog could not fill a third of it, so the
+         workbook came out anonymous no matter what was typed. */
+      field('omega-pm-cust', 'Customer', (window.S && window.S.customer) || '') +
       field('omega-pm-addr', 'Site address', '') +
       '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">' +
         field('omega-pm-city', 'City', '') +
@@ -127896,7 +129311,22 @@ challengeRow(s) +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
         field('omega-pm-util', 'Utility', '') +
         field('omega-pm-fuel', 'Generator fuel', s.gensetKw ? 'diesel' : '') +
-      '</div>';
+      '</div>' +
+      /* A permitting matrix is an agency-facing artifact. In most states
+         everything sent to county planning, a fire marshal or a utility can
+         be pulled through a public-records request, and competitors and
+         opposing landowners read them. */
+      '<div style="margin-top:10px;padding:9px 11px;background:#141d2e;' +
+      'border:1px solid #24405e;border-radius:6px">' +
+      '<label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer">' +
+      '<input type="checkbox" id="omega-pm-agency" style="margin-top:2px">' +
+      '<span><b style="font-size:12px">Agency-facing register</b>' +
+      '<span style="display:block;font-size:10.5px;color:#8FA3B8;line-height:1.5;' +
+      'margin-top:3px">Strips the customer name, the buildout capacity beyond the ' +
+      'filed phase, the project cost basis and internal notes. Per-agency fees ' +
+      'stay \u2014 that agency published them. Use this for anything that goes to ' +
+      'a county, a fire marshal or a utility; keep the internal register for ' +
+      'what stays inside the company.</span></span></label></div>';
 
     modal('Permitting Matrix', body, function (close) {
       var site = {
@@ -127912,6 +129342,13 @@ challengeRow(s) +
       };
       window.OmegaPermitReport.exportXlsx({
         projectName: el('omega-pm-name').value || 'Permitting Matrix',
+        customer: (el('omega-pm-cust').value || '').trim(),
+        agencyFacing: !!(el('omega-pm-agency') && el('omega-pm-agency').checked),
+        systemLine: [
+          s.bessKw ? String(+(s.bessKw / 1000).toFixed(2)) + ' MW / ' +
+                     String(+((s.bessKwh || 0) / 1000).toFixed(2)) + ' MWh' : null,
+          s.gensetKw ? s.gensetKw.toLocaleString() + ' kW generation' : null
+        ].filter(Boolean).join(' + '),
         address: el('omega-pm-addr').value || '',
         site: site,
         filename: 'permitting-matrix'
