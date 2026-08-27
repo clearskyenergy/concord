@@ -1616,7 +1616,7 @@ function setCustomBand(){
    numbers that came from a build that was no longer the code — the same
    export pasted twice, identical to the byte, while the fix sat undeployed.
    A visible build id ends that argument in one glance. */
-var OMEGA_BUILD = 'wb-2026-08-27a';
+var OMEGA_BUILD = 'wb-2026-08-27c';
 try{ window.OMEGA_BUILD = OMEGA_BUILD; }catch(e){}
 
 var LINES = [];
@@ -2414,6 +2414,7 @@ var STANDARD=[
      new service is selected. */
   ['Concrete Work \u2014 Utility Transformer Pad','mr','xfmrpad',true],
   /* future proofing, from the positions drawn on the map */
+  ['Trenching \u2014 future proofing','fp','trench',true],
   ['Spare conduit & conductors \u2014 future proofing','fp','conduit',true],
   ['Panel positions \u2014 future proofing','fp','panel',true],
   /* future proofing, from the FP positions drawn on the map */
@@ -2571,8 +2572,17 @@ var RATE_CARD = {
      make-ready. What it saves is the second mobilisation and a second
      trench, not the materials. */
   fpPanelPosition:{ mat:500, lab:1000, n:1, note:'per position, from the 50 Fitch St FP block' },
-  fpSpareRunPerPosition: 60,          /* LF carried per position when the
-                                         drawing does not measure the spare */
+  /* Future proofing extends the DITCH by a stall or two, not by the length
+     of the job. The 112 Willow baseline is explicit: 156 LF of live trench
+     and 10 LF on the future-proofing row — one parking space. Carrying the
+     whole run into future proofing put thousands of ineligible excavation
+     on a sheet for a ditch already dug and already claimed.
+
+     The spare CONDUIT is different: the pipe is pulled the whole route
+     alongside the live run, which is why that same sheet shows 156 LF of
+     future-proofing conduit against 10 LF of future-proofing trench. */
+  fpStallWidthFt: 10,                 /* one parking space of extra ditch */
+  fpMaxStalls: 2,                     /* "one or two spaces", not the job  */
   fpConduit: { mat:1.95, lab:2.50 }   /* same pipe, same ditch, dug once */
 };
 
@@ -2583,8 +2593,9 @@ function standardRate(row, bucket){
      the live rate off the live footage and the ineligible total would carry
      the whole job's conduit. */
   if(bucket==='fp'){
-    if(row==='conduit' || row==='wire') return standardRate('_fpConduit','fp');
-    if(row==='panel'  || row==='boards') return standardRate('_fpPanel','fp');
+    if(row==='conduit' || row==='wire')       return standardRate('_fpConduit','fp');
+    if(row==='panel'   || row==='boards')     return standardRate('_fpPanel','fp');
+    if(row==='trench'  || row==='trenchTurf') return standardRate('_fpTrench','fp');
   }
   var B=L2_BASELINE, ST=STANDARD_ITEMS.l2;
   var ports=Math.max(1, num(DATA.plugs)||1);
@@ -2676,15 +2687,32 @@ function standardRate(row, bucket){
        Driven by the FP positions drawn on the map. They live in the 'fp'
        bucket, which every programme form books as ineligible, so they
        never inflate the rebate base. */
+    /* Spare conduit runs the live route — same trench, pulled at the same
+       time — so it defaults to the measured underground run, not a
+       per-position guess. */
     case '_fpConduit': var nfp=num(DATA.nFpPositions)||0;
                        if(!nfp) return null;
-                       var fpLf=num(DATA.ftConduitFP) || (nfp*RATE_CARD.fpSpareRunPerPosition);
+                       var fpLf=num(DATA.ftConduitFP) || num(DATA.ftConduitUG) || 0;
+                       if(!fpLf) return null;
                        return { qty:fpLf, unit:'LF',
                                 mat:RATE_CARD.fpConduit.mat*fpLf,
                                 lab:RATE_CARD.fpConduit.lab*fpLf,
                                 note:Math.round(fpLf)+' LF \u2014 spare conduit & conductors to '
                                      +nfp+' future position'+(nfp===1?'':'s')
                                      +', pulled while the trench is open. Not energised.' };
+    /* The only NEW excavation future proofing needs: the ditch extended past
+       the last live stall to reach the future one. One space per position,
+       two at most — beyond that the run is being rebuilt, not extended. */
+    case '_fpTrench':  var nft=num(DATA.nFpPositions)||0;
+                       if(!nft) return null;
+                       var stalls=Math.min(nft, RATE_CARD.fpMaxStalls);
+                       var fpTrenchLf=num(DATA.ftTrenchFP) || (stalls*RATE_CARD.fpStallWidthFt);
+                       var _tr=trenchSurfacePaved()?RATE_CARD.trenchPaved:RATE_CARD.trenchTurf;
+                       return { qty:fpTrenchLf, unit:'LF',
+                                mat:_tr.mat*fpTrenchLf, lab:_tr.lab*fpTrenchLf,
+                                note:fpTrenchLf+' LF \u2014 ditch extended '+stalls+' parking space'
+                                     +(stalls===1?'':'s')+' to reach '+nft+' future position'
+                                     +(nft===1?'':'s')+'. The live run is already dug and claimed.' };
     case '_fpPanel':   var np2=num(DATA.nFpPositions)||0;
                        if(!np2) return null;
                        return { qty:np2, unit:'EA',
@@ -3959,7 +3987,10 @@ var ES_TPL_ROWS = [
   { r:19, sec:'gen',  k:'trench',    cells:'qpls'  },
   { r:20, sec:'gen',  k:'trenchTurf',cells:'qpls'  },
   { r:21, sec:'gen',  k:'conduit',   cells:'qplns' },
-  { r:22, sec:'gen',  k:'wire',      cells:'qplns' },
+  /* Template row 22 is "Conduit & Cable - Above Ground/Indoor". It was wired
+     to 'wire', which on our form is Cable-UNDERGROUND — so the interior run
+     never reached the sheet and E22 came out blank. */
+  { r:22, sec:'gen',  k:'conduitAG', cells:'qplns' },
   { r:23, sec:'gen',  k:'restore',   cells:'qplns' },
   { r:24, sec:'gen',  k:'handhole',  cells:'pls'   },
   { r:25, sec:'gen',  k:'concrete',  cells:'qpls'  },
@@ -4065,7 +4096,14 @@ function _esSetCell(xml, ref, value, isText){
     if(sM) styleAttr=' s="'+sM[1]+'"';
   }
 
-  var newCell = isText
+  /* isText==='f' writes a FORMULA with its cached result, so the cell shows
+     the number immediately and still recalculates when a reviewer edits the
+     quantity or the unit price. Their own sheets are built this way —
+     G19=E19*F19, I19=SUM(G19:H19) — and a pasted number where a formula
+     belongs is the first thing that gets questioned. */
+  var newCell = (isText==='f')
+    ? '<c r="'+ref+'"'+styleAttr+'><f>'+_esXmlEsc(String(value.f))+'</f><v>'+Number(value.v||0)+'</v></c>'
+    : isText
     ? '<c r="'+ref+'"'+styleAttr+' t="inlineStr"><is><t xml:space="preserve">'+_esXmlEsc(value)+'</t></is></c>'
     : '<c r="'+ref+'"'+styleAttr+'><v>'+Number(value)+'</v></c>';
 
@@ -4141,10 +4179,23 @@ function esFillTemplateExact(){
           var R=ES_TPL_ROWS[i], w2=byKey[R.sec+'|'+R.k];
           if(!w2) continue;
           var has=function(ch){ return R.cells.indexOf(ch)>=0; };
-          if(has('q') && w2.qty!=null)       xml=_esSetCell(xml,'E'+R.r, num(w2.qty), false);
-          if(has('p') && w2.unitPrice!=null) xml=_esSetCell(xml,'F'+R.r, r2(w2.unitPrice), false);
-          if(has('m') && w2.mat)             xml=_esSetCell(xml,'G'+R.r, r2(w2.mat), false);
+          var _q=(has('q') && w2.qty!=null) ? num(w2.qty) : null;
+          var _u=(has('p') && w2.unitPrice!=null) ? r2(w2.unitPrice) : null;
+          if(_q!=null) xml=_esSetCell(xml,'E'+R.r, _q, false);
+          if(_u!=null) xml=_esSetCell(xml,'F'+R.r, _u, false);
+          /* Material is quantity x unit price, as a formula, whenever both
+             are known. Falls back to the plain number when a row has no
+             per-unit basis (a lump sum, an allowance). */
+          if(has('m') && w2.mat){
+            if(_q!=null && _u!=null && Math.abs(_q*_u - r2(w2.mat)) < 0.02)
+              xml=_esSetCell(xml,'G'+R.r, {f:'E'+R.r+'*F'+R.r, v:r2(w2.mat)}, 'f');
+            else
+              xml=_esSetCell(xml,'G'+R.r, r2(w2.mat), false);
+          }
           if(has('l') && w2.lab)             xml=_esSetCell(xml,'H'+R.r, r2(w2.lab), false);
+          /* Total is always the sum of the two money columns. */
+          if(w2.mat || w2.lab)
+            xml=_esSetCell(xml,'I'+R.r, {f:'SUM(G'+R.r+':H'+R.r+')', v:r2(num(w2.mat)+num(w2.lab))}, 'f');
           if(has('n') && w2.note)            xml=_esSetCell(xml,'C'+R.r, w2.note, true);
           if(has('s') && (w2.mat||w2.lab))   xml=_esSetCell(xml,'J'+R.r, 'Yes', true);
         }
