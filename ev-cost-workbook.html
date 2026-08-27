@@ -1616,7 +1616,7 @@ function setCustomBand(){
    numbers that came from a build that was no longer the code — the same
    export pasted twice, identical to the byte, while the fix sat undeployed.
    A visible build id ends that argument in one glance. */
-var OMEGA_BUILD = 'wb-2026-08-26l';
+var OMEGA_BUILD = 'wb-2026-08-27a';
 try{ window.OMEGA_BUILD = OMEGA_BUILD; }catch(e){}
 
 var LINES = [];
@@ -1876,8 +1876,17 @@ function classify(cat, desc, size, unit){
      it at all — a reviewer reads that block as capacity built for later, and
      the programmes book it as ineligible, so it was both wrong and costly.
      Only a transformer described as future or spare belongs in fp. */
-  if(/transformer|xfmr/.test(t))                   return future ? {b:'fp', r:'xfmr',    fp:0}
-                                                                : {b:'mr', r:'xfmrpad', fp:0};
+  /* A transformer PAD is utility-side work and belongs on that row. The
+     transformer line itself — "service transformer (if required)" — is
+     something the contractor is carrying, so it stays customer-side. Sending
+     it to the utility-side row moved $1,140 out of the customer's eligible
+     total and into the separately-reported Civil Work figure, so the sheet
+     footed $1,140 under the contractor proposal for the same job. */
+  if(/transformer|xfmr/.test(t)){
+    if(future) return {b:'fp', r:'xfmr', fp:0};
+    return /\bpad\b/.test(t) ? {b:'mr', r:'xfmrpad', fp:0}
+                             : {b:'mr', r:'other',   fp:0};
+  }
   /* Spare gear, spare breaker positions and the like are future proofing
      wherever they appear — the earlier rule only caught conduit and wire,
      so a spare panel stayed in make-ready and inflated the eligible cost. */
@@ -3353,8 +3362,23 @@ function buildModel(form){
   }
   gm=r2(gm); gl=r2(gl);
   var inc=r2(nval('b_incent'));
+  /* Total tax actually charged, summed off the _tax rows the blocks carry.
+     Nothing set this before, so every reader of m.taxTotal saw 0 — which is
+     why the National Grid sheet printed a blank Sales Tax line and footed
+     $699.38 under the contractor proposal for the same job. */
+  var taxTotal=0, _bi, _ri, _bb, _rr;
+  for(_bi=0;_bi<out.length;_bi++){
+    _bb=out[_bi];
+    for(_ri=0;_ri<_bb.rows.length;_ri++){
+      _rr=_bb.rows[_ri];
+      if(_rr && _rr.tax) taxTotal += num(_rr.mat) + num(_rr.lab);
+    }
+  }
+  taxTotal=r2(taxTotal);
+
   /* the sheet writers need these to emit live tax formulas */
   return { blocks:out, mat:gm, lab:gl, total:r2(gm+gl), incentive:inc, net:r2(gm+gl-inc),
+           taxTotal:taxTotal,
            taxRate:rate, taxOnLabor:taxLab, taxSingle:single, taxSink:sinkId,
            taxBase:(single?{mat:singleMat, lab:singleLab}:null) };
 }
