@@ -179,6 +179,8 @@ table.pv td.num{text-align:right;font-variant-numeric:tabular-nums}
   <div class="tb-sub">EV Cost Workbook</div>
   <div class="tb-sp"></div>
   <span class="tb-who" id="tbWho"></span>
+  <span class="tb-who" id="tbBuild" title="Which build is running. Quote this when a number looks wrong."
+        style="opacity:.55;margin-left:10px;font-variant-numeric:tabular-nums"></span>
   <button class="btn p" id="btnExport" onclick="exportWorkbook()">Export workbook</button>
 </div>
 
@@ -259,7 +261,7 @@ table.pv td.num{text-align:right;font-variant-numeric:tabular-nums}
         </div>
         <div class="grid2">
           <label class="f"><span>Markup on cost (%)</span><input type="number" id="p_markup" value="0" step="0.1" oninput="render()"></label>
-          <label class="f"><span>Trench split to future-proofing (%)</span><input type="number" id="p_fp" value="50" step="1" oninput="applyTrenchSplit()"></label>
+          <label class="f"><span>Trench split to future-proofing (%)</span><input type="number" id="p_fp" value="0" step="1" oninput="applyTrenchSplit()"></label>
         </div>
         <label class="f" style="margin-bottom:6px"><span>Tax base</span>
           <select id="p_taxlab" onchange="taxKnob()">
@@ -314,6 +316,8 @@ table.pv td.num{text-align:right;font-variant-numeric:tabular-nums}
         <div class="row-btn">
           <button class="btn sm" onclick="addManual()">Add cost line</button>
           <button class="btn sm" onclick="addStandardRows()">Add permitting, design, activation…</button>
+          <button class="btn sm" onclick="priceCivilFromDrawing()"
+                  title="Prices trenching, conduit and wiring from the measured footage — only rows the estimate has not already priced">Price civil from the drawing</button>
           <button class="btn sm" onclick="reclassifyAll()">Re-run auto mapping</button>
         </div>
       </div>
@@ -543,7 +547,24 @@ var L2_BASELINE = {
   perFoot:  { trenchCT:{mat:15.00, lab:80.00},
               trenchMA:{mat:25.00, lab:120.00},
               trenchTurf:{mat:10.00, lab:55.00},
-              conduitUG:{mat:2.75, lab:13.87},
+              /* Conduit and cable priced together, per foot of RUN, from a
+                 submitted Eversource sheet that cleared review:
+
+                   underground   1,168 LF  ->  $2,277.60 mat / $2,920.00 lab
+                   above ground    240 LF  ->  $1,203.00 mat / $1,230.00 lab
+
+                 = $1.95 + $2.50 per foot underground, $5.01 + $5.13 above.
+                 The old split rates summed to $5.25 material and $17.34
+                 LABOR per foot — seven times the real figure, which on that
+                 1,168 LF run bills $20,253 against an actual $2,920. The
+                 National Grid jobs corroborate the labor at $2.50-$3.04.
+
+                 Above ground costs more per foot and nothing to dig: RMC,
+                 straps and standoffs, and on a new service the lateral
+                 structure rides in this row. */
+              conduitCableUG:{mat:1.95, lab:2.50},
+              conduitCableAG:{mat:5.0125, lab:5.125},
+              conduitUG:{mat:2.75, lab:13.87},   /* legacy split, unused    */
               conduitAG:{mat:4.25, lab:21.26},
               cableUG:{mat:2.50, lab:3.47},
               cableAG:{mat:2.50, lab:21.00},
@@ -1591,6 +1612,13 @@ function setCustomBand(){
 }
 
 /* ── 4. STATE + HELPERS ───────────────────────────────────────────── */
+/* Stamped in the header and on window. Four rounds were spent chasing
+   numbers that came from a build that was no longer the code — the same
+   export pasted twice, identical to the byte, while the fix sat undeployed.
+   A visible build id ends that argument in one glance. */
+var OMEGA_BUILD = 'wb-2026-08-26l';
+try{ window.OMEGA_BUILD = OMEGA_BUILD; }catch(e){}
+
 var LINES = [];
 var DATA  = {};        /* every form field, keyed — survives form switches */
 var LOGO  = null;
@@ -1756,10 +1784,16 @@ function contractorToBrand(){
 }
 
 /* ── 6. CLASSIFIER ────────────────────────────────────────────────── */
-function classify(cat, desc, size){
+/* Estimates spell linear feet four different ways. */
+function isFootUnit(u){ return /^(lf|lft|lnft|ln ft|ft|feet|foot|linear ?f(ee)?t)$/.test(String(u||'').toLowerCase().replace(/\./g,'')); }
+
+function classify(cat, desc, size, unit){
   var c=String(cat||'').toLowerCase();
   var t=String(desc||'').toLowerCase()+' '+String(size||'').toLowerCase();
-  var future=/spare|future.?proof/.test(t);
+  /* "future capacity", "for future EVSE" and "future position" all describe
+     future proofing as plainly as "future-proof" does; the narrower pattern
+     read them as live make-ready. Not matched: "in the future" as prose. */
+  var future=/spare|future.?proof|future (capacity|position|port|evse|charger|expansion)|for future/.test(t);
   var dc=(chargerClass()==='dcfc');
 
   if(/ev charging/.test(c)){
@@ -1786,16 +1820,38 @@ function classify(cat, desc, size){
   /* RMC, EMT and anything called out as indoor or above grade is an
      above-ground run; Eversource prices those on their own line. */
   var above = /\brmc\b|\bemt\b|above.?ground|indoor|interior|surface|exposed/.test(t);
-  if(/conduit|fitting/.test(c)){
+  /* Category first, then the description for per-foot lines. The editor
+     files conduit under 'Electrical', so matching only on category sent a
+     1,168 LF run of 2" PVC to Other \u2014 and the rate card then priced the
+     same run again on the Conduit & Conductors row, billing it twice. The
+     per-foot guard keeps a lump-sum 'conduit stubs' line out of it. */
+  var perFootLine = isFootUnit(unit) && !/civil/.test(c)
+                 && !/trench|sawcut|backfill|restorat|bedding|warning tape/.test(t);
+  if(/conduit|raceway|fitting/.test(c) ||
+     (perFootLine && /\b(conduit|emt|rmc|imc|pvc|sch ?40|sch ?80|innerduct|liquidtight|sealtite)\b/.test(t))){
     if(future) return {b:'fp', r:'conduit', fp:0};
     if(above) return {b:'mr', r:'conduitAG', fp:0};
     return {b:'mr', r:'conduit', fp:0};
   }
-  if(/wire|cable/.test(c)){
+  if(/wire|cable|conductor/.test(c) ||
+     (perFootLine && /\b(thhn|thwn|xhhw|conductor|feeder cable)\b/.test(t))){
     if(future) return {b:'fp', r:'wire', fp:0};
     if(above) return {b:'mr', r:'wireAG', fp:0};
     return {b:'mr', r:'wire', fp:0};
   }
+  /* A service-point tie-in is service-board work on every matrix, and the
+     Eversource sheet has a Panels/Service Board/Breakers row for it. It was
+     falling to Other, which is where a reviewer looks for scope deviations,
+     not for the tie-in itself. Kept off the 'panel' row on purpose: this is
+     the connection, not a new panel, so it must not be held out with the
+     panel/switchgear costs. */
+  /* A service-point tie-in belongs on Panels/Service Board/Breakers — on the
+     Eversource matrix 'boards' is the Other row, so routing it there put the
+     tie-in under scope deviations. It goes on the panel row and is exempted
+     from the panel hold-out below, because connecting to existing service is
+     not the same as buying new gear. */
+  if(/service point|poi tie|tie.?in|service board|service entrance/.test(t))
+    return {b:'mr', r:'panel', fp:0};
   if(/civil/.test(c)){
     /* Concrete bases and pads are their own line on the National Grid and
        Eversource matrices. Under Civil they were all being called trench,
@@ -1814,8 +1870,14 @@ function classify(cat, desc, size){
   if(/label|signage|arc.?flash/.test(t))           return {b:'ne', r:'signage',  fp:0};
   if(/network|software|ocpp|telemetr|bms/.test(t)) return {b:'ne', r:'network',  fp:0};
   if(/warrant/.test(t))                            return {b:'ne', r:'warranty', fp:0};
-  if(/transformer|xfmr/.test(t))                   return future ? {b:'fp',r:'xfmr',fp:0}
-                                                                : {b:(dc?'mr':'fp'), r:'xfmr', fp:0};
+  /* A service transformer is the UTILITY'S transformer: utility-side
+     make-ready, not future proofing. Sending it to 'fp' on every Level 2 job
+     put $1,140 of "Future Proofing" on a sheet with no future positions on
+     it at all — a reviewer reads that block as capacity built for later, and
+     the programmes book it as ineligible, so it was both wrong and costly.
+     Only a transformer described as future or spare belongs in fp. */
+  if(/transformer|xfmr/.test(t))                   return future ? {b:'fp', r:'xfmr',    fp:0}
+                                                                : {b:'mr', r:'xfmrpad', fp:0};
   /* Spare gear, spare breaker positions and the like are future proofing
      wherever they appear — the earlier rule only caught conduit and wire,
      so a spare panel stayed in make-ready and inflated the eligible cost. */
@@ -1838,7 +1900,7 @@ function classify(cat, desc, size){
 
 /* ── 7. IMPORT PATHS ──────────────────────────────────────────────── */
 function addLine(o){
-  var cls=classify(o.category, o.description, o.size);
+  var cls=classify(o.category, o.description, o.size, o.unit);
   LINES.push({
     id:_nid++, desc:o.description||'(unnamed)', size:o.size||'', cat:o.category||'',
     qty:(o.qty==null?'':o.qty), unit:o.unit||'',
@@ -1902,7 +1964,7 @@ function packEstimate(est, w){
 /* Charger fleet handed over by the editor: real models, part numbers and
    price-book figures. Held here so the baseline rows and the port count
    use what is on the drawing rather than a generic port. */
-var EDITOR_FLEET = null, EDITOR_BASIS = null, EDITOR_EVT = null;
+var EDITOR_FLEET = null, EDITOR_BASIS = null, EDITOR_EVT = null, EDITOR_COUNTS = null;
 
 function loadPayload(pay){
   LINES=[];
@@ -1910,13 +1972,44 @@ function loadPayload(pay){
   EDITOR_FLEET = (pay.chargers && pay.chargers.length) ? pay.chargers : null;
   EDITOR_BASIS = pay.priceBasis || null;
   EDITOR_EVT   = pay.evTotals   || null;
+  /* Ports and STATIONS are different numbers and both are asked for: a
+     National Grid sheet wants ports on one line and stations on the next.
+     The station count was arriving from the editor and being dropped. */
+  if(EDITOR_EVT){
+    var _st = num(EDITOR_EVT.l2Units) + num(EDITOR_EVT.dcfcUnits);
+    if(_st>0 && !num(DATA.stations)) DATA.stations=_st;
+    if(num(EDITOR_EVT.ports)>0)      DATA.plugs=num(EDITOR_EVT.ports);
+  }
   for(i=0;i<pay.lines.length;i++) addLine(pay.lines[i]);
   if(pay.crewRate) document.getElementById('p_crew').value=pay.crewRate;
   if(pay.site){
     if(!d('applicant') && pay.site.applicant) DATA.applicant=pay.site.applicant;
     if(!d('address')   && pay.site.address)   DATA.address  =pay.site.address;
+    if(!d('city')      && pay.site.city)      DATA.city     =pay.site.city;
+    /* The drawing's own name. A single-site pull never set it, so the sheet
+       tab and National Grid's Unique Site Name came out blank \u2014 only the
+       multi-site path was filling it in. */
+    if(!d('site')) DATA.site = pay.site.name || pay.site.mapName || pay.site.label || '';
   }
   EDITOR_FEET = pay.feet || null;
+  /* What the drawing actually has on it — bollards, pads, handholes, the
+     meter. Without this the sheet could price the run but not the equipment
+     standing in it, and every one of those rows was typed by hand. */
+  EDITOR_COUNTS = pay.counts || null;
+  if(EDITOR_COUNTS && num(EDITOR_COUNTS.fpPositions)>0)
+    DATA.nFpPositions = num(EDITOR_COUNTS.fpPositions);
+  if(EDITOR_COUNTS && num(EDITOR_COUNTS.fpPositions)>0)
+    DATA.nFpPositions = num(EDITOR_COUNTS.fpPositions);
+  if(EDITOR_COUNTS){
+    if(num(EDITOR_COUNTS.bollard)>0)  DATA.nBollard  = num(EDITOR_COUNTS.bollard);
+    if(num(EDITOR_COUNTS.pad)>0)      DATA.nPad      = num(EDITOR_COUNTS.pad);
+    if(num(EDITOR_COUNTS.xfmrpad)>0)  DATA.nXfmrPad  = num(EDITOR_COUNTS.xfmrpad);
+    if(num(EDITOR_COUNTS.handhole)>0) DATA.nHandhole = num(EDITOR_COUNTS.handhole);
+    if(num(EDITOR_COUNTS.meter)>0)    DATA.nMeter    = num(EDITOR_COUNTS.meter);
+    /* an existing meter bank on the drawing answers the service question */
+    if(!d('serviceScenario') && EDITOR_COUNTS.existingService)
+      DATA.serviceScenario = SERVICE_SCENARIOS[0];
+  }
   if(pay.chargers) applyChargerCosts(pay.chargers);
   if(pay.contractor) applyContractor(pay.contractor);
   if(applyDetectedClass()) setClass(DATA['class']);
@@ -2290,11 +2383,55 @@ function addManual(){
   var el=document.getElementById('d-'+(_nid-1));
   if(el){ el.focus(); el.select(); }
 }
+/* A fourth element means "only add this row if the rate card can actually
+   price it" — a Conduit & Cable line added at $0 because nothing was drawn
+   reads as a priced zero, which is worse than an empty row. */
 var STANDARD=[
   ['Permitting Costs','mr','permit'], ['Design Costs','mr','design'],
   ['Activation','evse','activation'], ['Shipping','evse','shipping'],
   ['EVSE Networking/Software','ne','network'], ['EVSE Warranty','ne','warranty'],
-  ['Signage','ne','signage'], ['Striping','ne','striping']
+  ['Signage','ne','signage'], ['Striping','ne','striping'],
+  /* Conduit and wiring ARE measured scope. If the map has 3 runs then the
+     sheet has conduit, full stop — the estimate does not always itemise it
+     (112 Willow drew 156 ft and priced no conduit line at all), so leaving
+     this to a button meant a real run silently missing from a submission.
+     Gated on footage, so nothing appears without something drawn. */
+  ['Conduit & Conductors','mr','conduit',true],
+  ['Conduit & Cable \u2014 Above Ground/Indoor','mr','conduitAG',true],
+  ['Wiring','mr','wire',true],
+  /* Every one of the three filed jobs on a new service carries a utility
+     transformer pad; the two on existing services carry none. Gated on the
+     scenario rather than assumed, and standardRate returns nothing unless a
+     new service is selected. */
+  ['Concrete Work \u2014 Utility Transformer Pad','mr','xfmrpad',true],
+  /* future proofing, from the positions drawn on the map */
+  ['Spare conduit & conductors \u2014 future proofing','fp','conduit',true],
+  ['Panel positions \u2014 future proofing','fp','panel',true],
+  /* future proofing, from the FP positions drawn on the map */
+  ['Spare conduit & conductors \u2014 future proofing','fp','conduit',true],
+  ['Panel positions \u2014 future proofing','fp','panel',true],
+  /* placed on the drawing, so priced from it */
+  ['Protective Bollards','ne','bollard',true],
+  ['Concrete Work/Bases/Pads','mr','concrete',true],
+  /* Trenching is measured too, but it is ONE excavation with two possible
+     rows. The estimate's own trench line lands on the paved row while the
+     measured footage would add the turf row — the same ditch billed twice,
+     which is where $10,920 of "non-continuously paved" came from on a job
+     whose only trench is 156 ft in-ground. scopeGroup() below keeps the two
+     rows as one scope: whichever is already priced wins, the other stays
+     out. */
+  ['Trenching/Restoration','mr','trench',true],
+  ['Trenching \u2014 non-continuously paved','mr','trenchTurf',true],
+  /* NOT auto-added, on purpose:
+       Restoration  — $0 on all five filed sheets. Surface repair is inside
+                       the trench rate there, so adding a separate row bills
+                       the patch twice ($3,440 + $1,600 on an 80 LF job).
+       Concrete pads — real on four of five jobs, but only because pads were
+                       drawn. Deriving them from port count invents $2,400 of
+                       concrete on a site whose chargers are wall-mounted.
+       Bollards      — same: drawn or not present.
+     All three keep their rates and are one click away under
+     "Add permitting, design, activation…"; they are simply never assumed. */
 ];
 /* Price the standard rows instead of inserting them at zero.
 
@@ -2305,11 +2442,156 @@ var STANDARD=[
    rates for. Every value below comes from the five closed jobs.
 
    Anything already priced is left alone; this only fills blanks. */
+/* The Detail/Notes column is where a reviewer decides whether a number is
+   credible. "1168 LF" tells them nothing; the scope behind it tells them
+   what the money bought and which code the work is priced to. These read the
+   way the sheets that cleared review read. */
+function scopeNote(row, qty, ports){
+  var q=r2(qty)||0, n=Math.round(q);
+  switch(row){
+    case 'trench':
+      return n+' LF \u2014 Trenching & backfill through continuously-paved area '
+        +'(asphalt/concrete). Scope includes: saw-cutting pavement, excavation to required depth, '
+        +'spoils haul-off/disposal, gravel and sand bedding & backfill, mechanical compaction in '
+        +'lifts, base-course millings, hot-mix asphalt patch, and rolling to restore the driving '
+        +'surface to compacted grade. Per NEC 300.5 (24-in min cover, warning tape).';
+    case 'trenchTurf':
+      return n+' LF \u2014 Trenching & backfill through non-continuously-paved area (grass/ground '
+        +'cover). Scope includes: sod/topsoil strip and set aside, excavation to required depth, '
+        +'sand bedding, backfill and compaction in lifts, topsoil replacement, seed or sod '
+        +'restoration. Per NEC 300.5 (24-in min cover, warning tape).';
+    case 'conduit':
+      return n+' LF \u2014 Underground conduit & cable (make-ready). Scope includes: furnish & '
+        +'install Sch 40 PVC conduit in parallel runs, pull conductors (3 wires/run + EGC), '
+        +'couplings/sweeps/fittings, mule tape, and terminations from the service to each charging '
+        +'station. Footage includes elevation/slack per run. Code-compliant trench per NEC 300.5.';
+    case 'wire':
+      return n+' LF \u2014 Above-ground/indoor conduit & cable. Scope includes: furnish & install '
+        +'RMC (exposed/riser) or PVC where permitted, straps/standoffs, fittings, conductor pull '
+        +'and terminations from the house/owner panel to the outdoor distribution panel.';
+    case 'restore':
+      return n+' LF \u2014 Surface restoration and/or remediation over the trench route. Scope '
+        +'includes: base-course millings, hot-mix asphalt patch or concrete replacement to match '
+        +'existing, rolling to compacted grade, and landscape reinstatement where disturbed.';
+    case 'concrete':
+      return n+' EA \u2014 Concrete EVSE equipment bases (one per dual-port pedestal, serving '
+        +(num(ports)||n*2)+' ports). Scope includes: form & pour reinforced concrete pad or '
+        +'sonotube, anchor bolts/template, conduit stub-ups, finish & cure to charger mounting spec.';
+    case 'bollard':
+      return n+' EA \u2014 Protective bollards. Scope includes: furnish & install concrete-filled '
+        +'steel pipe bollards, core/excavate footing, set in concrete, prime & paint safety-yellow.';
+    case 'xfmrpad':
+      return n+" EA \u2014 Utility transformer/service pad (3'x5'). Scope includes: excavate & form, "
+        +'pour reinforced concrete pad, set conduit stub-ups and grounding, finish & cure for the '
+        +'new pad-mount service.';
+    default: return n+'';
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   MASTER RATE CARD — back-solved from submitted cost matrices
+
+   Every figure here was read out of a sheet that was actually filed, not
+   chosen. The count after each rate is how many of the five Eversource MA
+   submissions carry it identically:
+
+     10 Village Green Way (10 port) · 11 Marble St (4) · 17 Calhoun St (4)
+     298 Kingstown (10)             · 29 Spring St (6)
+
+   Nothing in a cost matrix should be a number somebody typed. Quantities
+   come from the site map, rates come from here, and the sheet multiplies
+   the two — which is why the QUANTITY FORMULAS below matter as much as the
+   prices. All three were verified against every one of the five jobs:
+
+     pedestals          = ports / 2        (dual-port units)
+     breaker positions  = ports + 3        (three service positions + one/port)
+     freight            = $250 + $100/port (4p $650 · 6p $850 · 10p $1,250)
+
+   Where the jobs disagree, the rate is NOT hard-coded and the reason is
+   recorded instead. Above-ground conduit labor ran $2.50-$5.13 per foot
+   across four jobs, and distribution equipment tracks service size rather
+   than port count, so both stay driven by the estimate.
+   ══════════════════════════════════════════════════════════════════════ */
+var RATE_CARD = {
+  source:'5 Eversource MA submissions, 4-10 ports, 2026',
+
+  /* per foot of run ─────────────────────────────────────────────────── */
+  trenchPaved:   { mat:15.00, lab:80.00, n:5, note:'continuously paved (asphalt/concrete)' },
+  trenchTurf:    { mat:10.00, lab:60.00, n:1, note:'non-continuously paved (grass/ground cover)' },
+  conduitCableUG:{ mat:1.95,  lab:2.50,  n:5, note:'conduit + conductors, underground' },
+  /* Above ground is NOT a per-foot labor rate. It looked like one and the
+     three filed jobs disagreed wildly ($3.25, $3.85, $5.13 per foot) — but
+     solving a + b*ft gives $1,170 + $0.25/LF, which is EXACT on all three:
+     240 LF -> $1,230.00 | 325 LF -> $1,251.25 | 390 LF -> $1,267.50.
+     It is a setup cost (risers, standoffs, terminations at both ends) with a
+     small per-foot component, so a mid per-foot rate was wrong at every
+     length. Material is a clean $1.95/LF on all three. */
+  conduitCableAG:{ mat:1.95, labBase:1170, labPerFt:0.25, n:3,
+                   note:'above ground/indoor; labor is setup + $0.25/LF' },
+  /* 17 Calhoun carries $735 more material than $1.95/LF, and its own note
+     says why: "includes new-service structure (underground lateral - no
+     riser) per Price Guide". That is a scope item, not a rate, so it is
+     added only when the job actually has a new service — never silently. */
+  newServiceStructure:{ mat:735, lab:0, n:1 },
+
+  /* each ────────────────────────────────────────────────────────────── */
+  bollard:       { mat:250,  lab:300,  n:5 },
+  concreteBase:  { mat:800,  lab:400,  n:4, note:'one per dual-port pedestal' },
+  xfmrPad:       { mat:1200, lab:1300, n:3, note:"3'x5' utility transformer pad" },
+  mountKit:      { mat:1250, lab:500,  n:4, note:'pedestal / mounting kit per unit' },
+
+  /* per port ────────────────────────────────────────────────────────── */
+  charger:       { mat:2200, lab:0,    n:5 },
+  install:       { mat:0,    lab:1250, n:5, note:'EVSE installation labor' },
+  network:       { mat:480,  lab:0,    n:5, note:'matches the National Grid MUD chart too' },
+
+  /* per site ────────────────────────────────────────────────────────── */
+  housePanel:    { mat:0,    lab:1250, n:2, note:'house/owner panel upgrade' },
+  metering:      { mat:210,  lab:2000, n:3, note:'meter socket; 788 on a CT-cabinet service' },
+
+  /* formulas, not prices ────────────────────────────────────────────── */
+  pedestalsFor:  function(ports){ return Math.max(1, Math.ceil(num(ports)/2)); },
+  breakersFor:   function(ports){ return num(ports)+3; },
+  freightFor:    function(ports){ return 250 + 100*num(ports); },
+
+  /* ── FUTURE PROOFING ────────────────────────────────────────────────
+     A position built out now but not energised: spare conduit and cable
+     pulled to the pad while the trench is open, plus a panel position held
+     for it. No EVSE, no networking, no install labour — there is no port
+     yet, which is why every programme books it as INELIGIBLE rather than
+     make-ready. What it saves is the second mobilisation and a second
+     trench, not the materials. */
+  fpPanelPosition:{ mat:500, lab:1000, n:1, note:'per position, from the 50 Fitch St FP block' },
+  fpSpareRunPerPosition: 60,          /* LF carried per position when the
+                                         drawing does not measure the spare */
+  fpConduit: { mat:1.95, lab:2.50 }   /* same pipe, same ditch, dug once */
+};
+
 function standardRate(row, bucket){
+  /* The future-proofing block reuses the SAME row keys as make-ready
+     ('conduit', 'panel'), so the bucket is what distinguishes a spare run
+     from a live one. Without this, a future-proofing row would be priced at
+     the live rate off the live footage and the ineligible total would carry
+     the whole job's conduit. */
+  if(bucket==='fp'){
+    if(row==='conduit' || row==='wire') return standardRate('_fpConduit','fp');
+    if(row==='panel'  || row==='boards') return standardRate('_fpPanel','fp');
+  }
   var B=L2_BASELINE, ST=STANDARD_ITEMS.l2;
   var ports=Math.max(1, num(DATA.plugs)||1);
   var peds =Math.max(1, Math.ceil(ports/2));       /* dual-port pedestals */
   var ftT  =num(DATA.ftTrench), ftC=num(DATA.ftConduit), ftW=num(DATA.ftCable);
+  var ftUG =num(DATA.ftConduitUG) || ftC, ftAG=num(DATA.ftConduitAG);
+  var _ts=trenchSplit(), ftTurf=_ts.turf;
+  /* A new service is a fact about the site, not a price. Explicit flag first;
+     otherwise a site being given new panel/service gear implies one. */
+  /* the $735 lateral structure and the utility pad belong to a NEW service,
+     not to an upgrade that reuses the existing one */
+  var newSvc = isNewService();
+  /* Paved footage when it is measured; only derive it as the balance when
+     nobody has said. Subtracting from an already-explicit paved figure left
+     11 Marble with 0.24 LF of trench against a filed 44.12. */
+  ftT=_ts.paved;
   var MA   =String(DATA.city||DATA.state||'').toUpperCase().indexOf('MA')>=0;
 
   switch(row){
@@ -2320,15 +2602,47 @@ function standardRate(row, bucket){
     case 'permit':     return { qty:1, unit:'LS', mat:0, lab:permitFromSubtotal(subtotalExcluding('permit')),
                                 note:'3% of project cost' };
     case 'activation': return { qty:ports, unit:'EA', mat:395*ports, lab:0, note:'$395/port' };
-    case 'shipping':   return { qty:ports, unit:'EA', mat:0, lab:ST.freight.lab*ports,
-                                note:'freight, $162.50/port' };
+    /* Both per port, identical on all five submitted jobs. They were the
+       only cost lines with no rate at all \u2014 they arrived from the estimate
+       or not at all, so a hand-built job silently lost them. */
+    case 'charger':    return ports>0 ? { qty:ports, unit:'EA',
+                                mat:RATE_CARD.charger.mat*ports, lab:0,
+                                note:ports+' ports \u00d7 $'+RATE_CARD.charger.mat+'/port' } : null;
+    case 'install':    return ports>0 ? { qty:ports, unit:'EA', mat:0,
+                                lab:RATE_CARD.install.lab*ports,
+                                note:'EVSE installation \u2014 '+ports+' ports \u00d7 $'+RATE_CARD.install.lab } : null;
+    /* $250 + $100/port, exact on every submitted job (4p $650, 6p $850,
+       10p $1,250) \u2014 it was a flat per-port figure before. */
+    case 'shipping':   return ports>0 ? { qty:ports, unit:'EA', mat:0,
+                                lab:RATE_CARD.freightFor(ports),
+                                note:ports+' port freight \u2014 $250 mobilisation + $100/port' } : null;
     case 'network':    return { qty:ports, unit:'EA', mat:ST.networking.mat*ports, lab:0,
                                 note:'$480/port \u2014 public L2 / MUD only' };
     case 'warranty':   return { qty:ports, unit:'EA', mat:0, lab:0,
                                 note:'quote from the OEM \u2014 not carried on the reference jobs' };
     case 'striping':   return { qty:ports, unit:'EA', mat:0, lab:0, note:'' };
-    case 'bollard':    return { qty:peds, unit:'EA', mat:ST.bollard.mat*peds, lab:ST.bollard.lab*peds,
-                                note:peds+' \u00d7 1 per pedestal' };
+    /* One bollard per Level 2 PORT is the standing rule, so every port
+       carries protection whether or not it was drawn. The drawing still
+       wins when it shows MORE than the rule requires — extra bollards get
+       drawn for a reason.
+
+       Worth knowing: all five filed Eversource sheets carry one per
+       PEDESTAL, not per port (4 ports/2 bollards, 10 ports/5). This rule
+       roughly doubles that line, so the sheet now says plainly how the
+       count was reached. */
+    case 'bollard':    var drawn=num(DATA.nBollard)||0;
+                       var perPort=(chargerClass()==='l2') ? ports : 0;
+                       var nb=Math.max(drawn, perPort);
+                       if(!nb) return null;
+                       return { qty:nb, unit:'EA',
+                                mat:RATE_CARD.bollard.mat*nb, lab:RATE_CARD.bollard.lab*nb,
+                                note:scopeNote('bollard', nb)
+                                     + (drawn && drawn<perPort
+                                        ? ' Count is one per Level 2 port ('+perPort+'); the drawing shows '
+                                          + drawn + '.'
+                                        : drawn>perPort
+                                        ? ' Count taken from the drawing ('+drawn+'), above the one-per-port minimum.'
+                                        : ' One per Level 2 port.') };
     case 'pedestal':   return { qty:peds, unit:'EA', mat:ST.pedestal.mat*peds, lab:ST.pedestal.lab*peds,
                                 note:peds+' dual-port pedestals' };
     case 'meter':      return { qty:1, unit:'LS', mat:ST.metering.mat, lab:ST.metering.lab, note:'' };
@@ -2338,11 +2652,81 @@ function standardRate(row, bucket){
     case 'mount':      return { qty:ports, unit:'EA', mat:ST.wallMount.mat*ports,
                                 lab:ST.wallMount.lab*ports, note:ports+' \u00d7 wall-mount kits' };
     case 'housePanel': return { qty:1, unit:'LS', mat:0, lab:ST.housePanel.lab, note:'' };
-    case 'xfmrpad':    return { qty:1, unit:'EA', mat:ST.xfmrPad.mat, lab:ST.xfmrPad.lab,
-                                note:'opt-in \u2014 absent on 2 of 5 reference jobs' };
+    case 'xfmrpad':    return isNewService() ? { qty:1, unit:'EA',
+                                mat:RATE_CARD.xfmrPad.mat, lab:RATE_CARD.xfmrPad.lab,
+                                note:scopeNote('xfmrpad', 1) } : null;
     case 'restore':    return ftT>0 ? { qty:ftT, unit:'LF', mat:B.perFoot.restoration.mat*ftT,
-                                        lab:B.perFoot.restoration.lab*ftT, note:ftT+' LF' } : null;
-    case 'concrete':   return { qty:peds, unit:'EA', mat:800*peds, lab:400*peds, note:'EVSE bases' };
+                                        lab:B.perFoot.restoration.lab*ftT, note:scopeNote('restore', ftT) } : null;
+    /* The rate card has carried per-foot conduit, cable and trench rates all
+       along, but nothing ever applied them: a drawing with 746 LF of conduit
+       still exported a Conduit & Cable row reading $0 next to a priced
+       trench, because these rows were only filled when the estimate happened
+       to carry a matching line. Underground and above ground price
+       separately — an indoor run costs more per foot and less to dig. */
+    /* ── FUTURE-PROOFING ROWS ─────────────────────────────────────
+       Driven by the FP positions drawn on the map. They live in the 'fp'
+       bucket, which every programme form books as ineligible, so they
+       never inflate the rebate base. */
+    case '_fpConduit': var nfp=num(DATA.nFpPositions)||0;
+                       if(!nfp) return null;
+                       var fpLf=num(DATA.ftConduitFP) || (nfp*RATE_CARD.fpSpareRunPerPosition);
+                       return { qty:fpLf, unit:'LF',
+                                mat:RATE_CARD.fpConduit.mat*fpLf,
+                                lab:RATE_CARD.fpConduit.lab*fpLf,
+                                note:Math.round(fpLf)+' LF \u2014 spare conduit & conductors to '
+                                     +nfp+' future position'+(nfp===1?'':'s')
+                                     +', pulled while the trench is open. Not energised.' };
+    case '_fpPanel':   var np2=num(DATA.nFpPositions)||0;
+                       if(!np2) return null;
+                       return { qty:np2, unit:'EA',
+                                mat:RATE_CARD.fpPanelPosition.mat*np2,
+                                lab:RATE_CARD.fpPanelPosition.lab*np2,
+                                note:np2+' panel position'+(np2===1?'':'s')
+                                     +' held for future EVSE \u2014 breaker space, bus and '
+                                     +'terminations. No charger, no networking.' };
+    case 'conduit':    return ftUG>0 ? { qty:ftUG, unit:'LF',
+                                        mat:RATE_CARD.conduitCableUG.mat*ftUG,
+                                        lab:RATE_CARD.conduitCableUG.lab*ftUG,
+                                        note:scopeNote('conduit', ftUG) } : null;
+    /* The new-service structure rides on this row: $735 of material on three
+       of the five filed jobs, two of which have ZERO above-ground footage —
+       so the row has to appear for the adder alone, and the adder must not
+       scale with feet. Driven by the site being a new service, never added
+       silently on an existing-service job. */
+    /* Above-ground footage belongs on the form's ABOVE-GROUND row. On the
+       Eversource matrix 'wire' is "Cable - Underground" and the above-ground
+       row is keyed conduitAG — so 15 LF of interior EMT was being priced
+       onto an underground line. Price conduitAG where the form has it, and
+       fall back to 'wire' only on forms that use it as the AG row. */
+    case 'conduitAG':  return ftAG>0 ? { qty:ftAG, unit:'LF',
+                                mat:RATE_CARD.conduitCableAG.mat*ftAG
+                                    + (newSvc?RATE_CARD.newServiceStructure.mat:0),
+                                lab:RATE_CARD.conduitCableAG.labBase
+                                    + RATE_CARD.conduitCableAG.labPerFt*ftAG,
+                                note:scopeNote('wire', ftAG) } : null;
+    case 'wire':       if(rowExists(bucket,'conduitAG')) return null;   /* AG lives there */
+                       if(!(ftAG>0) && newSvc)
+                         return { qty:0, unit:'LF', mat:RATE_CARD.newServiceStructure.mat, lab:0,
+                                  note:'New-service structure (underground lateral, no riser) per Price Guide' };
+                       return ftAG>0 ? { qty:ftAG, unit:'LF',
+                                        mat:RATE_CARD.conduitCableAG.mat*ftAG
+                                            + (newSvc?RATE_CARD.newServiceStructure.mat:0),
+                                        lab:RATE_CARD.conduitCableAG.labBase
+                                            + RATE_CARD.conduitCableAG.labPerFt*ftAG,
+                                        note:scopeNote('wire', ftAG) } : null;
+    case 'trench':     return ftT>0 ? { qty:ftT, unit:'LF',
+                                        mat:RATE_CARD.trenchPaved.mat*ftT,
+                                        lab:RATE_CARD.trenchPaved.lab*ftT,
+                                        note:scopeNote('trench', ftT) } : null;
+    case 'trenchTurf': return ftTurf>0 ? { qty:ftTurf, unit:'LF',
+                                        mat:RATE_CARD.trenchTurf.mat*ftTurf,
+                                        lab:RATE_CARD.trenchTurf.lab*ftTurf,
+                                        note:scopeNote('trenchTurf', ftTurf) } : null;
+    case 'concrete':   var np=num(DATA.nPad)||0;
+                       return np ? { qty:np, unit:'EA',
+                                mat:RATE_CARD.concreteBase.mat*np,
+                                lab:RATE_CARD.concreteBase.lab*np,
+                                note:scopeNote('concrete', np, ports) } : null;
     default: return null;
   }
 }
@@ -2367,6 +2751,35 @@ function subtotalExcluding(skipRow){
    again: 860 Colony exported $1,253.99 against a base that no longer
    existed, $511.05 too high. Recomputed on every render, unless the rep has
    typed over it. */
+/* The card-priced civil rows are derived, not typed: they have to follow the
+   footage and the trench-surface switch. Without this, flipping the surface
+   left the old row priced at the old rate on the old line. */
+function syncCivil(){
+  if(!civilFromCard()) return;
+  var i, l, rate;
+  for(i=0;i<LINES.length;i++){
+    l=LINES[i];
+    if(l.src!=='standard' || !CIVIL_ROWS[l.row] || l.pinned) continue;
+    rate=standardRate(l.row, l.bucket);
+    /* Flipping the trench surface does not zero the excavation, it MOVES it:
+       the row itself migrates to the other surface rather than leaving the
+       sheet with no trench at all. */
+    if(!rate && (l.row==='trench' || l.row==='trenchTurf')){
+      var other=(l.row==='trench') ? 'trenchTurf' : 'trench';
+      var alt=standardRate(other, l.bucket);
+      if(alt && rowExists(l.bucket, other)){
+        l.row=other;
+        l.desc=(other==='trenchTurf') ? 'Trenching \u2014 non-continuously paved'
+                                      : 'Trenching/Restoration';
+        rate=alt;
+      }
+    }
+    if(!rate){ l.mat=0; l.lab=0; l.qty=''; l.note=''; continue; }
+    l.mat=r2(rate.mat); l.lab=r2(rate.lab);
+    l.qty=rate.qty; l.unit=rate.unit; l.note=rate.note||'';
+  }
+}
+
 function syncPermit(){
   var i, l;
   for(i=0;i<LINES.length;i++){
@@ -2378,6 +2791,68 @@ function syncPermit(){
   }
 }
 
+/* Explicit, and named for what it does. Prices the measured civil rows from
+   the takeoff — only the ones with footage behind them, only where no line
+   already covers that row, and only when asked. */
+function priceCivilFromDrawing(){
+  var want=[['Trenching/Restoration','mr','trench'],
+            ['Trenching \u2014 non-continuously paved','mr','trenchTurf'],
+            ['Conduit & Conductors','mr','conduit'],
+            ['Wiring','mr','wire']];
+  var added=0, skipped=[], i, j, l, rate, have;
+  for(i=0;i<want.length;i++){
+    var label=want[i][0], bucket=want[i][1], row=want[i][2];
+    if(!rowExists(bucket,row)) continue;
+    have=false;
+    for(j=0;j<LINES.length;j++){
+      l=LINES[j];
+      if(!(num(l.mat)||num(l.lab)) || l.bucket!==bucket) continue;
+      /* same row, or a sibling row describing the same physical work — the
+         paved and turf trench rows are one ditch */
+      if(l.row===row || (scopeGroup(row) && scopeGroup(l.row)===scopeGroup(row))){ have=true; break; }
+    }
+    if(have){ skipped.push(label+' \u2014 already priced by the estimate'); continue; }
+    rate=standardRate(row,bucket);
+    if(!rate){ continue; }                     /* nothing measured for it */
+    LINES.push({ id:_nid++, desc:label, size:'', cat:'', qty:rate.qty, unit:rate.unit,
+                 mat:r2(rate.mat), lab:r2(rate.lab), note:rate.note||'',
+                 bucket:bucket, row:row, fp:0, src:'standard' });
+    added++;
+  }
+  render();
+  msg('mapMsg', added
+      ? added+' civil row'+(added===1?'':'s')+' priced from the drawing.'
+        + (skipped.length? ' Left alone: '+esc(skipped.join('; '))+'.' : '')
+      : 'Nothing to price: the drawing has no unpriced footage.', added?'ok':'note');
+  return added;
+}
+window.priceCivilFromDrawing=priceCivilFromDrawing;
+
+/* Trenching paved and trenching turf are the same ditch on two rows; either
+   may carry it, but never both. */
+/* Quantity for a footage-driven row. The raw DATA field is not enough:
+   the editor reports the split by its own 'in-ground' default, while the
+   trench surface decides which row the excavation actually lands on. The
+   sheet showed $2,340 / $12,480 of trenching against a BLANK quantity and
+   no unit price, because it read ftTrenchPaved (0) instead of the split. */
+function esRowQty(key){
+  if(key==='ftTrenchPaved') return trenchSplit().paved;
+  if(key==='ftTrenchTurf')  return trenchSplit().turf;
+  return num(DATA[key]);
+}
+
+function scopeGroup(row){
+  if(row==='trench' || row==='trenchTurf'){
+    /* One ditch on one row — UNLESS the drawing genuinely reports both
+       surfaces, in which case they are two different excavations at two
+       different rates and both rows belong on the sheet. */
+    var t=trenchSplit();
+    if(t.paved>0 && t.turf>0) return null;
+    return 'excavation';
+  }
+  return null;
+}
+
 function addStandardRows(opts){
   opts=opts||{};
   var i, j, have, existing, rate, filled=0, added=0;
@@ -2386,9 +2861,23 @@ function addStandardRows(opts){
     if(!rowExists(bucket,row)) continue;          /* form may not have that row */
     have=false; existing=null;
     for(j=0;j<LINES.length;j++){
+      if(civilHeldOut(LINES[j])) continue;      /* superseded by the drawing */
       if(LINES[j].bucket===bucket && LINES[j].row===row){ have=true; existing=LINES[j]; }
     }
+    /* Rows that describe the same physical work: if a sibling already
+       carries it, this row must not add it again. */
+    if(!have && scopeGroup(row)){
+      for(j=0;j<LINES.length;j++){
+        if(civilHeldOut(LINES[j])) continue;   /* superseded — does not block the card */
+        if(LINES[j].bucket===bucket && scopeGroup(LINES[j].row)===scopeGroup(row)
+           && (num(LINES[j].mat)||num(LINES[j].lab))){ have=true; existing=null; break; }
+      }
+      if(have) continue;      /* sibling has it — nothing to add or fill */
+    }
     rate=standardRate(row, bucket);
+    /* nothing measured to price it with — leave the row out rather than
+       adding a $0 line that looks like a decision */
+    if(!rate && STANDARD[i][3]) continue;
     if(!have){
       LINES.push({ id:_nid++, desc:STANDARD[i][0], size:'', cat:'',
                    qty:rate?rate.qty:'', unit:rate?rate.unit:'',
@@ -2420,7 +2909,7 @@ function reclassifyAll(){
   var i, c;
   for(i=0;i<LINES.length;i++){
     if(LINES[i].src!=='estimate') continue;
-    c=classify(LINES[i].cat, LINES[i].desc, LINES[i].size);
+    c=classify(LINES[i].cat, LINES[i].desc, LINES[i].size, LINES[i].unit);
     LINES[i].bucket=c.b; LINES[i].row=c.r; LINES[i].fp=c.fp;
   }
   render();
@@ -2483,8 +2972,16 @@ function autofillFeet(){
   if(EDITOR_FEET){
     var E=EDITOR_FEET;
     DATA.ftTrench      = Math.round(num(E.trench));
-    DATA.ftTrenchPaved = Math.round(num(E.trenchPaved));
-    DATA.ftTrenchTurf  = Math.round(num(E.trenchTurf!=null?E.trenchTurf:E.trench));
+    /* When the editor sends a split, use it. When it sends only a total,
+       the trench is CONTINUOUSLY PAVED \u2014 which is where the classifier puts
+       the trench line and where all four reference sheets carry it. The old
+       default sent the whole run to the turf row while the money stayed on
+       the paved row, so the sheet showed $1,046 against 0 ft on one line and
+       550 ft against $0 on the next. */
+    DATA.ftTrenchPaved = Math.round(num(E.trenchPaved!=null ? E.trenchPaved
+                                     : (E.trenchTurf!=null ? Math.max(0, num(E.trench)-num(E.trenchTurf))
+                                                           : num(E.trench))));
+    DATA.ftTrenchTurf  = Math.round(num(E.trenchTurf));
     DATA.ftConduit     = Math.round(num(E.conduit));
     DATA.ftConduitUG   = Math.round(num(E.conduitUG!=null?E.conduitUG:E.conduit));
     DATA.ftConduitAG   = Math.round(num(E.conduitAG));
@@ -2496,7 +2993,7 @@ function autofillFeet(){
     return;
   }
 
-  var trench=0, paved=0, cond=0, cable=0, egc=0, i, l, t;
+  var trench=0, paved=0, turf=0, cond=0, cable=0, egc=0, i, l, t;
   var haveDrawnTrench=false;
   for(i=0;i<LINES.length;i++){
     t=String(LINES[i].desc||'').toLowerCase();
@@ -2512,8 +3009,9 @@ function autofillFeet(){
          excavation as a drawn trench run. Count the drawn runs only. */
       if(haveDrawnTrench && !/\(in-ground\)|sawcut/.test(t)) continue;
       trench+=num(l.qty);
+      if(/turf|grass|landscap|lawn|non.?continuous|unpaved/.test(t)) turf+=num(l.qty);
       /* a sawcut is by definition through paving */
-      if(/sawcut|concrete/.test(t)) paved+=num(l.qty);
+      else if(/sawcut|concrete/.test(t)) paved+=num(l.qty);
     }
     else if(/conduit/i.test(l.cat)) cond+=num(l.qty);
     else if(/wire|cable/i.test(l.cat)){
@@ -2525,8 +3023,11 @@ function autofillFeet(){
     }
   }
   DATA.ftTrench=Math.round(trench);
-  DATA.ftTrenchPaved=Math.round(paved);
-  DATA.ftTrenchTurf=Math.round(trench-paved);
+  /* Only a run whose description says turf/grass is non-continuously paved;
+     everything else is paved, which is where the trench line and all four
+     reference sheets carry it. */
+  DATA.ftTrenchTurf =Math.round(Math.max(0, turf));
+  DATA.ftTrenchPaved=Math.round(Math.max(0, trench-turf));
   DATA.ftConduit=Math.round(cond);
   /* No per-run data in a pasted CSV, so treat the conduit as underground —
      the common case on a make-ready job, and the row a reviewer expects. */
@@ -2570,12 +3071,110 @@ function autofillPlugs(){
 /* True when this line is panel / service equipment on a site that is not
    getting any. Future-proofing spare gear is deliberately exempt: that is
    capacity the developer chose to add, not a panel the estimate assumed. */
+/* ── CIVIL COMES FROM THE DRAWING ──────────────────────────────────
+   The map measures the run: linear feet of trench, and the conduit and
+   cable inside it. That footage times the rate card IS the civil work.
+
+   The editor also prices its own trenching, warning tape and bedding as
+   line items, and those were winning. On 112 Willow that meant $9.44/LF of
+   trench labour against the $80/LF every one of the five filed Eversource
+   sheets carries — a $12,000 understatement on 156 ft, flagged by the
+   band warning but still exported.
+
+   So when the drawing has measured footage, the card prices the civil rows
+   and the estimate's own civil lines are held out. They stay visible in the
+   mapping and can be reinstated by switching the source. */
+var CIVIL_ROWS={ trench:1, trenchTurf:1, conduit:1, wire:1, restore:1 };
+
+/* Which surface the trench goes through, and therefore which row it lands
+   on and at what rate: $15/$80 per foot paved, $10/$60 turf.
+
+   The editor's trenchIn is 'ground' | 'asphalt' | 'concrete', and 'ground'
+   is what every run gets by default — it means BURIED, not "through grass".
+   Reading it as turf put 156 ft on the non-continuously-paved row at $10/$60
+   when all five filed Eversource sheets carry their trench on the paved row
+   at $15/$80. So the surface is stated here, defaulting to paved, and the
+   editor's split is only trusted when it actually reports both kinds. */
+function trenchSurfacePaved(){
+  return String(d('trenchSurface')||'').indexOf('Non-continuously')<0;
+}
+function trenchSplit(){
+  var p=num(DATA.ftTrenchPaved), t=num(DATA.ftTrenchTurf);
+  var total=num(DATA.ftTrench) || r2(p+t);
+  if(p>0 && t>0) return { paved:p, turf:t };      /* a genuine mixed run */
+  return trenchSurfacePaved() ? { paved:total, turf:0 } : { paved:0, turf:total };
+}
+function civilFromCard(){ return String(d('civilSource')||'').indexOf('estimate')<0; }
+function civilMeasured(){ return num(DATA.ftTrench)>0 || num(DATA.ftConduit)>0; }
+function civilHeldOut(l){
+  if(!l || l.bucket!=='mr' || !CIVIL_ROWS[l.row]) return false;
+  if(l.src==='standard' || l.baseline) return false;   /* the card's own rows */
+  return civilFromCard() && civilMeasured();
+}
+function civilHeldSummary(){
+  var i,l,n=0,t=0,names=[];
+  for(i=0;i<LINES.length;i++){
+    l=LINES[i];
+    if(civilHeldOut(l) && (num(l.mat)||num(l.lab))){ n++; t+=num(l.mat)+num(l.lab); names.push(l.desc); }
+  }
+  return { n:n, total:r2(t), names:names };
+}
+
+/* ── ELECTRIC SERVICE SCENARIO ─────────────────────────────────────
+   One answer that several rows depend on, and the same question both
+   utilities ask: UI's Section 2 wants "New/Upgraded Service" or "Existing
+   Service", and Eversource prices a service pad, a distribution assembly
+   and the new-service structure off it.
+
+   It replaces the old New panel Yes/No, which could not tell an upgrade
+   (new gear on an existing service, no utility pad, no lateral) from a
+   genuinely new service — and those differ by the $735 structure and a
+   $2,500 transformer pad. */
+var SERVICE_SCENARIOS = [
+  'Existing service — no new gear',
+  'Service upgrade — new gear on existing service',
+  'New service'
+];
+function serviceScenario(){
+  var v=d('serviceScenario');
+  if(v) return v;
+  /* honour a job saved before this control existed */
+  return d('needPanel')==='Yes' ? SERVICE_SCENARIOS[1] : SERVICE_SCENARIOS[0];
+}
+function isNewService(){  return serviceScenario()===SERVICE_SCENARIOS[2]; }
+function serviceNeedsGear(){ return serviceScenario()!==SERVICE_SCENARIOS[0]; }
+
 function panelHeldOut(l){
   if(!l || l.bucket!=='mr' || l.row!=='panel') return false;
-  return d('needPanel')!=='Yes';
+  /* The tie-in to existing service is work every job does; it sits on the
+     same row as new switchgear but is not new gear, so it stays priced when
+     the site is marked as needing no new panel. */
+  if(/service point|poi tie|tie.?in|service board|service entrance/i.test(String(l.desc||'')))
+    return false;
+  return !serviceNeedsGear();
 }
 /* Held-out money is never silently dropped: say what it is, say what it is
    worth, and put the switch to reinstate it one click away. */
+/* Say what the drawing superseded and what it is worth, so the swap is
+   never silent. */
+function civilHeldNote(){
+  if(!civilFromCard()) 
+    return '<div class="warn" style="margin-top:-4px;margin-bottom:12px">'
+      + 'Civil is coming from the estimate\u2019s own lines, not the drawing. '
+      + 'Check them against the accepted band before submitting.</div>';
+  var sum=civilHeldSummary();
+  if(!sum.n)
+    return '<div class="note" style="margin-top:-4px;margin-bottom:12px">'
+      + num(DATA.ftTrench)+' LF of trench and '+num(DATA.ftConduit)
+      + ' LF of conduit &amp; cable from the drawing, priced at the rate card.</div>';
+  return '<div class="note" style="margin-top:-4px;margin-bottom:12px">'
+    + '<b>Civil priced from the drawing:</b> '+num(DATA.ftTrench)+' LF trench, '
+    + num(DATA.ftConduit)+' LF conduit &amp; cable. '
+    + 'The estimate\u2019s own civil lines ('+esc(sum.names.slice(0,3).join(', '))
+    + (sum.names.length>3?' and '+(sum.names.length-3)+' more':'')
+    + ', '+money(sum.total)+') are superseded so nothing is counted twice.</div>';
+}
+
 function panelHeldNote(){
   var sum=panelHeldSummary(), i, l, names=[];
   if(!sum.n) return '';
@@ -2667,6 +3266,7 @@ function buildModel(form){
        equipment. The lines are not deleted — they stay visible in the
        mapping, and switching the control back puts them straight in. */
     if(panelHeldOut(l)) continue;
+    if(civilHeldOut(l)) continue;
     mm=num(l.mat)*mk; ll=num(l.lab)*mk;
     fp=Math.max(0, Math.min(100, num(l.fp)))/100;
     if(fp>0 && l.bucket!=='fp' && grid.fp){
@@ -2935,10 +3535,37 @@ function renderSiteForm(){
   h+='<label class="f"><span>Site label (used in the sheet tab name)</span>'
     +'<input type="text" id="f-site" value="'+esc(d('site')||'Site 1')+'" oninput="setD(\'site\',this.value)"></label>';
 
-  /* Off by default: most make-ready work lands on existing gear. */
-  if(!d('needPanel')) DATA.needPanel='No';
-  h+=fieldHTML({ k:'needPanel', label:'New panel / service equipment needed', type:'select',
-                 options:['No','Yes'] })
+  if(!d('trenchSurface')) DATA.trenchSurface='Continuously paved (asphalt, concrete)';
+  h+=fieldHTML({ k:'trenchSurface', label:'Trench surface', type:'select',
+                 options:['Continuously paved (asphalt, concrete)',
+                          'Non-continuously paved (ground cover, turf)'] })
+   + '<div class="note" style="margin-top:-4px;margin-bottom:12px">'
+   + 'Sets which row the excavation lands on and at what rate \u2014 '
+   + money(RATE_CARD.trenchPaved.mat)+'/'+money(RATE_CARD.trenchPaved.lab)+' per foot paved, '
+   + money(RATE_CARD.trenchTurf.mat)+'/'+money(RATE_CARD.trenchTurf.lab)+' turf. '
+   + 'The editor marks every run \u201cin-ground\u201d, which means buried, not unpaved, so it '
+   + 'cannot decide this for you.</div>';
+
+  if(!d('civilSource')) DATA.civilSource='The drawing \u00d7 rate card';
+  h+=fieldHTML({ k:'civilSource', label:'Civil work priced from', type:'select',
+                 options:['The drawing \u00d7 rate card','The estimate\u2019s own lines'] })
+   + civilHeldNote();
+
+  /* Existing service by default: most make-ready lands on existing gear. */
+  if(!d('serviceScenario')) DATA.serviceScenario=serviceScenario();
+  h+=fieldHTML({ k:'serviceScenario', label:'Electric service', type:'select',
+                 options:SERVICE_SCENARIOS })
+   + '<div class="note" style="margin-top:-4px;margin-bottom:12px">'
+   + (isNewService()
+      ? 'New service: panel and switchgear are priced, the $735 lateral structure rides on the '
+        + 'above-ground conduit row, and a utility transformer pad is included \u2014 all three of the '
+        + 'filed new-service jobs carry one.'
+      : serviceNeedsGear()
+      ? 'Upgrade: panel and switchgear are priced. No utility pad and no new-service structure \u2014 '
+        + 'those belong to a genuinely new service.'
+      : 'Existing service: panel and switchgear costs are left out. The utility asks for an invoice '
+        + 'against anything claimed here.')
+   + '</div>'
    + '<div class="note" style="margin-top:-4px;margin-bottom:12px">'
    + (d('needPanel')==='Yes'
       ? 'Panel, switchgear and service-equipment lines are priced into Make-Ready.'
@@ -3001,7 +3628,7 @@ function fieldHTML(f, tight){
 function shortLabel(l){ return String(l).replace(/^#\s*of\s*/i,'# ').replace(/^Total Feet of\s*/i,'Feet — '); }
 
 /* ── 12. RENDER — mapping + previews ──────────────────────────────── */
-function render(){ syncPermit(); renderMap(); renderOutputs(); }
+function render(){ syncCivil(); syncPermit(); renderMap(); renderOutputs(); }
 
 function renderMap(){
   var BL=activeBlocks();
@@ -3075,7 +3702,13 @@ function renderMap(){
       + bnote
       + '<div style="margin-top:8px">Blocks and rows come from '+esc(layoutName())
       + '. FP % moves part of a line into Future Proofing — shared trenching defaults to a '
-      + nval('p_fp')+'/'+(100-nval('p_fp'))+' split.</div>';
+      + nval('p_fp')+'/'+(100-nval('p_fp'))+' split.'
+      + (nval('p_fp')>0
+         ? ' <b>'+nval('p_fp')+'% of the trench is being claimed as future proofing</b> \u2014 which is '
+           +'INELIGIBLE on Eversource and National Grid, so it comes out of the rebate. Set it only when '
+           +'the drawing actually carries spare capacity.'
+         : '')
+      + '</div>';
 }
 function layoutName(){
   return (FORM && formAppliesToClass(FORM))
@@ -3552,6 +4185,24 @@ function esFillTemplate(){
       if(has('l') && w2.lab)              ws.getCell('H'+R.r).value=r2(w2.lab);
       if(has('n') && w2.note)             ws.getCell('C'+R.r).value=w2.note;
       if(has('s') && (w2.mat||w2.lab))    ws.getCell('J'+R.r).value='Yes';
+
+      /* Rows without 'm' deliberately leave the material column to the
+         template's own =E*F formula. When that formula is not there — and on
+         112 Willow it was not — the cell simply stays empty and the money
+         vanishes: $304.20 of conduit and $2,238.00 of chargers dropped off
+         the sheet, and it footed $2,542.20 under the contractor proposal for
+         the same job. Never leave a priced row blank: if the cell carries no
+         formula, write the number. */
+      ensureMoney('G'+R.r, w2.mat);
+      ensureMoney('H'+R.r, w2.lab);
+    }
+    function ensureMoney(addr, v){
+      v=r2(v||0);
+      if(!v) return;
+      var c=ws.getCell(addr), cur=c.value;
+      var hasFormula = cur && typeof cur==='object' && cur.formula;
+      var hasNumber  = typeof cur==='number' && cur;
+      if(!hasFormula && !hasNumber) c.value=v;
     }
     return wb.xlsx.writeBuffer();
   }).then(function(buf){
@@ -3911,7 +4562,7 @@ function sheetES40(wb, m, form, site){
 
     /* quantity x unit price where the line has a real quantity, so the
        master's =E*F still drives the material total */
-    var qty = R.qty ? dn(R.qty) : 0;
+    var qty = R.qty ? r2(esRowQty(R.qty)) : 0;
     if(R.mul && qty>0 && v.mat>0){
       es('E'+r, qty,          { align:'center', border:bd('thin','thin','thin','thin') });
       es('F'+r, v.mat/qty,    { align:'center', border:bd('thin','thin','thin','thin'), fmt:ACCT });
@@ -4063,7 +4714,7 @@ function esMatrix(m, form){
   function qtyFor(meta){
     if(!meta || !meta.qty) return null;
     if(meta.qty==='one') return 1;
-    var v=num(DATA[meta.qty]);
+    var v=esRowQty(meta.qty);
     return v>0 ? v : null;
   }
 
@@ -4079,6 +4730,27 @@ function esMatrix(m, form){
                  tot:r2(it.mat+it.lab), sub:(it.mat||it.lab)?'Yes':'' });
       sm+=it.mat; sl+=it.lab;
     }
+    /* One excavation, one row: the measured trench footage belongs on
+       whichever surface row actually carries the cost. The paved row was
+       showing the money with a blank quantity while the turf row showed 156
+       ft with no money — two half-rows describing one ditch, and a reviewer
+       cannot price either. */
+    (function(){
+      var paved=null, turf=null, k;
+      for(k=0;k<out.length;k++){
+        if(out[k].key==='trench')     paved=out[k];
+        if(out[k].key==='trenchTurf') turf =out[k];
+      }
+      if(!paved || !turf) return;
+      var total=num(DATA.ftTrench) || (num(DATA.ftTrenchPaved)+num(DATA.ftTrenchTurf));
+      if(!total) return;
+      var pHas=(paved.mat||paved.lab), tHas=(turf.mat||turf.lab);
+      if(pHas && !tHas){ paved.qty=total; turf.qty=null;
+                         if(paved.mat) paved.unitPrice=r2(paved.mat/total); }
+      else if(tHas && !pHas){ turf.qty=total; paved.qty=null;
+                         if(turf.mat) turf.unitPrice=r2(turf.mat/total); }
+    })();
+
     totals[S2.id]={ mat:r2(sm), lab:r2(sl), tot:r2(sm+sl) };
     sections.push({ id:S2.id, title:S2.title, rows:out, totals:totals[S2.id] });
   }
@@ -4126,23 +4798,38 @@ function previewFormNG(m, form){
   function td(v,cls,span){ return '<td'+(cls?' class="'+cls+'"':'')+(span?' colspan="'+span+'"':'')+'>'+(v===''||v==null?'&nbsp;':esc(v))+'</td>'; }
 
   h+=r(td('ESTIMATE','pv-ng-band',7));
-  h+=r(td('Estimate Date: '+new Date().toLocaleDateString('en-US'),'pv-ng-lbl',3)
-      +td('Project Details','pv-ng-lbl',2)+td('Contractor Details','pv-ng-lbl')+td('Customer Details','pv-ng-lbl'));
-  var L=[['National Grid Application #:', d('ngAppNo')],
-         ['National Grid WR #:',          d('ngWR')],
-         ['Program Segment (Public, Workplace, etc.):', d('category')]];
-  var M=[['Project Site Street Address:', d('address')],
-         ['Project City, State, ZIP Code:', d('city')],
-         ['Number of Ports:', num(DATA.plugs)||''],
-         ['Number of Stations:', num(DATA.stations)||num(DATA.plugs)||'']];
-  var R=[['Company Name:', d('company')], ['Telephone Number:', d('phone')], ['Email:', d('email')],
-         ['Name:', d('applicant')], ['Telephone Number:', d('custPhone')], ['Email:', d('custEmail')]];
-  var i, n=Math.max(L.length, M.length, R.length);
-  for(i=0;i<n;i++){
-    h+=r((L[i]?td(L[i][0],'pv-ng-lbl',2)+td(L[i][1]):td('',null,2)+td(''))
-        +(M[i]?td(M[i][0],'pv-ng-lbl')+td(M[i][1],null,2):td('')+td('',null,2))
-        +(R[i]?td(R[i][0],'pv-ng-lbl')+td(R[i][1]):td('')+td('')));
+  h+=r(td('Estimate Date: '+new Date().toLocaleDateString('en-US'),'pv-ng-lbl',7));
+
+  /* Three stacked panels rather than three side by side. Side by side, the
+     label/value pairs came to EIGHT columns against the seven every other
+     row uses, and one extra column shunts the whole table sideways — which
+     is why the description column was off-screen and the section bars read
+     "ical Work". Every row below is exactly seven columns. */
+  function panel(title, fields){
+    h+=r(td(title,'pv-ng-sec',7));
+    var i;
+    for(i=0;i<fields.length;i++)
+      h+=r(td(fields[i][0],'pv-ng-lbl',2)+td(fields[i][1],null,5));
   }
+  panel('Project Details', [
+    ['National Grid Application #:',               d('ngAppNo')],
+    ['National Grid WR #:',                        d('ngWR')],
+    ['Program Segment (Public, Workplace, etc.):', d('category')],
+    ['Project Site Street Address:',               d('address')],
+    ['Project City, State, ZIP Code:',             d('city')],
+    ['Number of Ports:',                           num(DATA.plugs)||''],
+    ['Number of Stations:',                        num(DATA.stations)||num(DATA.plugs)||'']
+  ]);
+  panel('Contractor Details', [
+    ['Company Name:',     d('company')],
+    ['Telephone Number:', d('phone')],
+    ['Email:',            d('email')]
+  ]);
+  panel('Customer Details', [
+    ['Name:',             d('applicant')],
+    ['Telephone Number:', d('custPhone')],
+    ['Email:',            d('custEmail')]
+  ]);
 
   h+=r(td('Desciption','pv-ng-hdr')+td('Detail/Notes','pv-ng-hdr')+td('Unit Type','pv-ng-hdr')
       +td('How Many ft/ea/ports','pv-ng-hdr')+td('Material Total $','pv-ng-hdr')
@@ -4215,7 +4902,7 @@ function previewFormES(m, form){
     var R=ES40.rows[i];
     if(R.band){ h+=r(td(R.t,'pv-es-sec',9)); continue; }
     var v=es40Cell(m, R);
-    var qty = R.qty ? dn(R.qty) : 0;
+    var qty = R.qty ? r2(esRowQty(R.qty)) : 0;
     var showQty = (R.mul && qty>0 && v.mat>0);
     var cTxt = v.note || R.c || '';
     if((R.r===39||R.r===40) && v.note)
@@ -4605,7 +5292,10 @@ function uiPdfValues(){
              : d('category')==='Public Parking'?'Destination Parking (Public)':'Workplace')),
     parkType:uiV('ui_parkType','Grade Level'),
     spaces:uiV('ui_spaces', ports), publicPlugs:uiV('ui_publicPlugs', 0), privatePlugs:uiV('ui_privatePlugs', ports),
-    service:uiV('ui_service','Existing Service'), wo:d('ui_wo'), svcAcct:d('ui_svcAcct'),
+    /* UI's Section 2 asks the same question, so it is answered from the
+       same place rather than typed twice and disagreeing. */
+    service:uiV('ui_service', serviceNeedsGear()?'New/Upgraded Service':'Existing Service'),
+    wo:d('ui_wo'), svcAcct:d('ui_svcAcct'),
     company:d('company'), cContact:d('contact'), cPhone:d('phone'), cEmail:d('email'),
     cAddr:d('cAddress'), network:d('ui_network'),
     mfr:uiV('ui_mfr', mfr), model:uiV('ui_model', model),
@@ -5444,7 +6134,11 @@ function ngRollup(m){
       /* a fixed quantity the sheet asks for (ports, stations) beats the
          summed line quantity, which double-counts when several lines share
          one row */
-      if(cfg.qty) byRow[rr].qty = num(DATA[cfg.qty]) || byRow[rr].qty;
+      /* Prefer the measured footage the sheet asks for, but never let an
+         unset key blank out a row that plainly has work on it — that is how
+         550 ft of trench ended up on a row with no money next to money on a
+         row with no feet. */
+      if(cfg.qty) byRow[rr].qty = num(DATA[cfg.qty]) || num(r.qty) || byRow[rr].qty;
       else if(num(r.qty)) byRow[rr].qty += num(r.qty);
       if(r.note) byRow[rr].notes.push(r.note);
     }
@@ -5889,6 +6583,8 @@ window.__omegaSetRep = function(email){
   PREPARED_BY = email || '';
   var w=document.getElementById('tbWho');
   if(w) w.textContent = PREPARED_BY;
+  var b=document.getElementById('tbBuild');
+  if(b) b.textContent = OMEGA_BUILD;
 };
 
 /* ── CROSS-ORIGIN HANDOFF FROM THE EDITOR ─────────────────────────
