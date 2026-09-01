@@ -19,7 +19,7 @@
    ║  and no shared file is involved. Takes effect on next page load.          ║
    ╚═══════════════════════════════════════════════════════════════════════════╝ */
 
-var PLAN = 'trial';
+var PLAN = 'tier1';
 
 
 /* ── What each plan means ──────────────────────────────────────────────────
