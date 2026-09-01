@@ -158,6 +158,21 @@ table.pv td.num{text-align:right;font-variant-numeric:tabular-nums}
 .gate-msg code{background:#F6F4F0;border:1px solid var(--line2);border-radius:3px;padding:1px 5px;font-size:11.5px}
 .gate-foot{margin-top:22px;padding-top:14px;border-top:1px solid var(--line2);font-size:10px;letter-spacing:.9px;text-transform:uppercase;color:var(--dim)}
 .tb-who{font-size:11px;color:var(--sub);padding-right:12px;border-right:1px solid var(--line);margin-right:2px}
+
+/* Rate settings opens as a dialog. In the left rail the table was clipped at
+   the column edge, which hid the evidence text — the part that tells a
+   customer WHY a rate is what it is. */
+.rate-modal{position:fixed;inset:0;z-index:9000;background:rgba(15,18,24,.55);
+  display:flex;align-items:flex-start;justify-content:center;padding:40px 20px;overflow:auto}
+.rate-modal-box{background:var(--bg,#fff);border-radius:12px;width:min(1080px,100%);
+  box-shadow:0 24px 60px rgba(0,0,0,.32);overflow:hidden}
+.rate-modal-head{display:flex;align-items:center;justify-content:space-between;gap:16px;
+  padding:18px 24px;border-bottom:1px solid var(--line2)}
+.rate-modal-title{font-size:17px;font-weight:700}
+.rate-modal-sub{font-size:11px;color:var(--sub);margin-top:2px}
+.rate-modal-body{padding:20px 24px 28px}
+.rate-modal-body table.pv{width:100%}
+.rate-modal-body table.pv td,.rate-modal-body table.pv th{vertical-align:top}
 </style>
 </head>
 <body>
@@ -182,6 +197,8 @@ table.pv td.num{text-align:right;font-variant-numeric:tabular-nums}
   <span class="tb-who" id="tbWho"></span>
   <span class="tb-who" id="tbBuild" title="Which build is running. Quote this when a number looks wrong."
         style="opacity:.55;margin-left:10px;font-variant-numeric:tabular-nums"></span>
+  <button class="btn" id="btnRates" onclick="openRateSettings()"
+          title="Set the labour and material rates every sheet is priced from">Settings</button>
   <button class="btn p" id="btnExport" onclick="exportWorkbook()">Export workbook</button>
 </div>
 
@@ -213,10 +230,7 @@ table.pv td.num{text-align:right;font-variant-numeric:tabular-nums}
       <div class="body" id="outPick"></div>
     </div>
 
-    <div class="card">
-      <h3>Rate settings<span class="hint">what every price is built from</span></h3>
-      <div class="body" id="rateSettings"></div>
-    </div>
+
 
     <div class="card">
       <h3>Contractor<span class="hint">the company submitting</span></h3>
@@ -1623,7 +1637,7 @@ function setCustomBand(){
    numbers that came from a build that was no longer the code — the same
    export pasted twice, identical to the byte, while the fix sat undeployed.
    A visible build id ends that argument in one glance. */
-var OMEGA_BUILD = 'wb-2026-09-01b';
+var OMEGA_BUILD = 'wb-2026-09-01c';
 try{ window.OMEGA_BUILD = OMEGA_BUILD; }catch(e){}
 
 var LINES = [];
@@ -3638,6 +3652,20 @@ function saveRateOverrides(){
 }
 window.setRate=setRate; window.resetRate=resetRate; window.resetAllRates=resetAllRates;
 
+function openRateSettings(){
+  var m=document.getElementById('rateModal');
+  if(!m) return;
+  renderRateSettings();
+  m.style.display='flex';
+}
+function closeRateSettings(){
+  var m=document.getElementById('rateModal');
+  if(m) m.style.display='none';
+  render();          /* pick up anything changed while it was open */
+}
+window.openRateSettings=openRateSettings;
+window.closeRateSettings=closeRateSettings;
+
 function renderRateSettings(){
   var host=document.getElementById('rateSettings');
   if(!host) return;
@@ -3661,13 +3689,16 @@ function renderRateSettings(){
          + 'Reset all to the filed evidence</button>';
 
   h+='<table class="pv" style="font-size:11px"><tr>'
-    +'<th style="text-align:left">Rate</th><th>Material</th><th>Labour</th>'
-    +'<th>Unit</th><th>Jobs</th><th></th></tr>';
+    +'<th style="text-align:left;width:34%">Rate</th>'
+    +'<th style="width:96px">Material</th><th style="width:96px">Labour</th>'
+    +'<th style="width:88px">Unit</th><th style="width:64px">Jobs</th>'
+    +'<th style="text-align:left">Where this number comes from</th>'
+    +'<th style="width:70px"></th></tr>';
 
   for(var i=0;i<RATE_FIELDS.length;i++){
     var f=RATE_FIELDS[i];
     if(f.sec){
-      h+='<tr><td colspan="6" style="background:var(--line2);font-weight:700;'
+      h+='<tr><td colspan="7" style="background:var(--line2);font-weight:700;'
         +'font-size:10px;letter-spacing:.4px">'+esc(f.sec)+'</td></tr>';
       continue;
     }
@@ -3683,11 +3714,15 @@ function renderRateSettings(){
     var showLab = !f.matOnly;
     if(f.plain || f.pct){ showMat=false; showLab=true; }
     h+='<tr'+(over?' style="background:rgba(255,193,7,.10)"':'')+'>'
-      +'<td><div style="font-weight:600">'+esc(f.label)+(over?' <span style="color:#b8860b">\u25cf</span>':'')+'</div>'
-      +'<div class="o" style="font-size:9px;line-height:1.35;opacity:.75">'+esc(f.why)+'</div></td>'
+      +'<td><div style="font-weight:600">'+esc(f.label)
+      +(over?' <span style="color:#b8860b" title="overridden">\u25cf</span>':'')+'</div>'
+      +(over?'<div style="font-size:9px;color:#b8860b">your rate \u2014 filed evidence was '
+             +money(rateDefaults()[f.k].mat)+' / '+money(rateDefaults()[f.k].lab)+'</div>':'')
+      +'</td>'
       + cell('mat', showMat) + cell('lab', showLab)
       +'<td style="text-align:center;white-space:nowrap">'+esc(f.unit)+'</td>'
       +'<td style="text-align:center;white-space:nowrap;font-size:10px">'+jobs+'</td>'
+      +'<td class="o" style="font-size:10px;line-height:1.4;opacity:.8">'+esc(f.why)+'</td>'
       +'<td style="text-align:center">'
       +(over?'<button class="btn sm" onclick="resetRate(\''+f.k+'\')">Reset</button>':'')
       +'</td></tr>';
@@ -3956,7 +3991,9 @@ function fieldHTML(f, tight){
 function shortLabel(l){ return String(l).replace(/^#\s*of\s*/i,'# ').replace(/^Total Feet of\s*/i,'Feet — '); }
 
 /* ── 12. RENDER — mapping + previews ──────────────────────────────── */
-function render(){ syncCivil(); syncPermit(); renderRateSettings(); renderMap(); renderOutputs(); }
+function render(){ syncCivil(); syncPermit();
+  var _rm=document.getElementById('rateModal');
+  if(_rm && _rm.style.display!=='none') renderRateSettings(); renderMap(); renderOutputs(); }
 
 function renderMap(){
   var BL=activeBlocks();
@@ -7179,5 +7216,18 @@ auth.onAuthStateChanged(function(user){
 
 })();
 </script>
+<div id="rateModal" class="rate-modal" style="display:none" onclick="if(event.target===this)closeRateSettings()">
+  <div class="rate-modal-box">
+    <div class="rate-modal-head">
+      <div>
+        <div class="rate-modal-title">Rate settings</div>
+        <div class="rate-modal-sub">What every price on every sheet is built from</div>
+      </div>
+      <button class="btn" onclick="closeRateSettings()">Done</button>
+    </div>
+    <div class="rate-modal-body" id="rateSettings"></div>
+  </div>
+</div>
+
 </body>
 </html>
