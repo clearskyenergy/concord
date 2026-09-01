@@ -6,6 +6,7 @@
 <title>EV Cost Workbook</title>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js" onerror="void 0"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js" onerror="void 0"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js" onerror="void 0"></script>
 <script src="/config.js" onerror="void 0"></script>
 <script src="/omega-tools.js" onerror="void 0"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js" onerror="window._XLFAIL=1"></script>
@@ -1622,7 +1623,7 @@ function setCustomBand(){
    numbers that came from a build that was no longer the code — the same
    export pasted twice, identical to the byte, while the fix sat undeployed.
    A visible build id ends that argument in one glance. */
-var OMEGA_BUILD = 'wb-2026-09-01a';
+var OMEGA_BUILD = 'wb-2026-09-01b';
 try{ window.OMEGA_BUILD = OMEGA_BUILD; }catch(e){}
 
 var LINES = [];
@@ -3559,35 +3560,81 @@ function setRate(k, which, v){
   rateSet(k, which, v);
   if(!RATE_OVERRIDES[k]) RATE_OVERRIDES[k]={};
   RATE_OVERRIDES[k][which]=num(v);
-  try{ localStorage.setItem(RATE_STORE_KEY, JSON.stringify(RATE_OVERRIDES)); }catch(e){}
+  saveRateOverrides();
   render();
 }
 function resetRate(k){
   var d=rateDefaults()[k]; if(!d) return;
   rateSet(k,'mat',d.mat); rateSet(k,'lab',d.lab);
   delete RATE_OVERRIDES[k];
-  try{ localStorage.setItem(RATE_STORE_KEY, JSON.stringify(RATE_OVERRIDES)); }catch(e){}
+  saveRateOverrides();
   render();
 }
 function resetAllRates(){
   var d=rateDefaults(), k;
   for(k in d) if(d.hasOwnProperty(k)){ rateSet(k,'mat',d[k].mat); rateSet(k,'lab',d[k].lab); }
   RATE_OVERRIDES={};
-  try{ localStorage.removeItem(RATE_STORE_KEY); }catch(e){}
+  saveRateOverrides();
   render();
+}
+function applyOverrideObj(o){
+  var k, w;
+  for(k in o) if(o.hasOwnProperty(k) && o[k] && typeof o[k]==='object'){
+    for(w in o[k]) if(o[k].hasOwnProperty(w)) rateSet(k,w,o[k][w]);
+    RATE_OVERRIDES[k]=o[k];
+  }
 }
 function loadRateOverrides(){
   rateDefaults();
+  /* Browser copy first so the panel is populated instantly, then the
+     account copy, which wins. */
   var raw=null;
   try{ raw=localStorage.getItem(RATE_STORE_KEY); }catch(e){}
-  if(!raw) return;
+  if(raw){ try{ applyOverrideObj(JSON.parse(raw)); }catch(e){} }
+  rateDocRef(function(ref){
+    if(!ref) return;
+    ref.get().then(function(snap){
+      if(!snap || !snap.exists) return;
+      var d=snap.data();
+      if(!d || !d.rates) return;
+      RATE_OVERRIDES={};
+      resetAllRatesQuiet();
+      applyOverrideObj(d.rates);
+      RATE_SOURCE='account';
+      try{ localStorage.setItem(RATE_STORE_KEY, JSON.stringify(RATE_OVERRIDES)); }catch(e){}
+      render();
+    })['catch'](function(){ /* offline or no access: the browser copy stands */ });
+  });
+}
+/* Reset without writing anything back — used before applying the account
+   copy so a rate cleared on another machine does not linger here. */
+function resetAllRatesQuiet(){
+  var d=rateDefaults(), k;
+  for(k in d) if(d.hasOwnProperty(k)){ rateSet(k,'mat',d[k].mat); rateSet(k,'lab',d[k].lab); }
+}
+
+/* One document per account. Keyed by the org domain so a company shares one
+   rate card, which is the point: pricing is the company's, not the rep's. */
+var RATE_SOURCE='browser';
+function rateDocRef(cb){
   try{
-    var o=JSON.parse(raw), k, w;
-    for(k in o) if(o.hasOwnProperty(k)){
-      for(w in o[k]) if(o[k].hasOwnProperty(w)) rateSet(k,w,o[k][w]);
-      RATE_OVERRIDES[k]=o[k];
-    }
-  }catch(e){}
+    if(typeof firebase==='undefined' || !firebase.firestore) return cb(null);
+    var org=window.OMEGA_ORG||'', user=window.OMEGA_USER||'';
+    if(!org && !user) return cb(null);
+    var id=(org||user).replace(/[^a-z0-9.-]+/gi,'_').toLowerCase();
+    cb(firebase.firestore().collection('rateCards').doc(id));
+  }catch(e){ cb(null); }
+}
+function saveRateOverrides(){
+  try{ localStorage.setItem(RATE_STORE_KEY, JSON.stringify(RATE_OVERRIDES)); }catch(e){}
+  rateDocRef(function(ref){
+    if(!ref) return;
+    ref.set({ rates:RATE_OVERRIDES,
+              updatedAt:new Date().toISOString(),
+              updatedBy:window.OMEGA_USER||'' }, {merge:true})
+      .then(function(){ RATE_SOURCE='account'; renderRateSettings(); })
+      ['catch'](function(){ RATE_SOURCE='browser'; renderRateSettings(); });
+  });
 }
 window.setRate=setRate; window.resetRate=resetRate; window.resetAllRates=resetAllRates;
 
@@ -3597,9 +3644,14 @@ function renderRateSettings(){
   var n=0, k;
   for(k in RATE_OVERRIDES) if(RATE_OVERRIDES.hasOwnProperty(k)) n++;
 
+  var scope = (RATE_SOURCE==='account' && (window.OMEGA_ORG||window.OMEGA_USER))
+    ? 'Saved to <b>'+esc(window.OMEGA_ORG||window.OMEGA_USER)+'</b> \u2014 these rates apply to '
+      + 'every project on this account, on any machine.'
+    : 'Saved in this browser only. Sign in to apply one rate card across the account.';
   var h='<div class="note" style="margin-bottom:10px">'
     + 'Every price on every sheet is built from these rates \u00d7 what the site map '
     + 'measures. Change one and the preview and all exports follow. '
+    + scope+' '
     + '<b>Jobs</b> is how many of the five filed submissions carry that figure \u2014 '
     + '<b>5 of 5</b> is settled, <b>1 of 5</b> is a starting point.'
     + (n ? ' <b>'+n+' rate'+(n===1?'':'s')+' overridden.</b>' : '')
@@ -7025,6 +7077,12 @@ function show(title, msg, actions){
 function openApp(email){
   $('gate').style.display='none';
   $('app').style.display='block';
+  /* The rate card belongs to the ACCOUNT, not the laptop. Pricing set once
+     has to apply to every project that account opens, on any machine —
+     browser storage could not do that, so a customer who lowered their
+     trench rate got the old number back on the next device. */
+  window.OMEGA_USER  = email || '';
+  window.OMEGA_ORG   = domainOf(email);
   if(window.__omegaSetRep) window.__omegaSetRep(email);
   if(window.__omegaBoot) window.__omegaBoot();
 }
