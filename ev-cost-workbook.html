@@ -213,6 +213,11 @@ table.pv td.num{text-align:right;font-variant-numeric:tabular-nums}
     </div>
 
     <div class="card">
+      <h3>Rate settings<span class="hint">what every price is built from</span></h3>
+      <div class="body" id="rateSettings"></div>
+    </div>
+
+    <div class="card">
       <h3>Contractor<span class="hint">the company submitting</span></h3>
       <div class="body">
         <label class="f"><span>Saved profiles</span>
@@ -1416,6 +1421,7 @@ function applyTenant(key){
   else {
     msg('tenantMsg','No colours on file for '+esc(t.name)+' and no logo to read. '
       + 'Upload their logo below and I\u2019ll take the colours from it, or type a hex.','warn');
+    loadRateOverrides();
     render();
   }
 }
@@ -1616,7 +1622,7 @@ function setCustomBand(){
    numbers that came from a build that was no longer the code — the same
    export pasted twice, identical to the byte, while the fix sat undeployed.
    A visible build id ends that argument in one glance. */
-var OMEGA_BUILD = 'wb-2026-08-27c';
+var OMEGA_BUILD = 'wb-2026-09-01a';
 try{ window.OMEGA_BUILD = OMEGA_BUILD; }catch(e){}
 
 var LINES = [];
@@ -2562,7 +2568,11 @@ var RATE_CARD = {
   /* formulas, not prices ────────────────────────────────────────────── */
   pedestalsFor:  function(ports){ return Math.max(1, Math.ceil(num(ports)/2)); },
   breakersFor:   function(ports){ return num(ports)+3; },
-  freightFor:    function(ports){ return 250 + 100*num(ports); },
+  /* Both halves are overridable in Rate settings. */
+  freightFor:    function(ports){
+                   var b=num(RATE_CARD._freightBase), p=num(RATE_CARD._freightPort);
+                   return (b||250) + (p||100)*num(ports);
+                 },
 
   /* ── FUTURE PROOFING ────────────────────────────────────────────────
      A position built out now but not energised: spare conduit and cable
@@ -2616,8 +2626,9 @@ function standardRate(row, bucket){
 
   switch(row){
     /* Design lands on $1,000/port in all four reference jobs. */
-    case 'design':     return { qty:ports, unit:'port', mat:0, lab:1000*ports,
-                                note:ports+' ports \u00d7 $1,000/port' };
+    case 'design':     return ports>0 ? { qty:ports, unit:'EA', mat:0,
+                                lab:(num(RATE_CARD._designPerPort)||1000)*ports,
+                                note:ports+' ports \u00d7 design & engineering' } : null;
     /* Permitting runs ~3% of project cost; exact on 75 Avon. */
     case 'permit':     return { qty:1, unit:'LS', mat:0, lab:permitFromSubtotal(subtotalExcluding('permit')),
                                 note:'3% of project cost' };
@@ -3424,6 +3435,219 @@ function uniqJoin(arr, label){
 }
 
 /* ── 11. RENDER — sheet picker + site form ────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════
+   RATE SETTINGS
+
+   Every price on every sheet comes from RATE_CARD. Until now it could only
+   be changed by editing the file, which meant a customer who prices trench
+   at $60/LF instead of $80 had no way to say so \u2014 and quietly took our
+   numbers to their utility.
+
+   Each row here says what it is, what it costs, and HOW MANY of the five
+   filed submissions carry that figure, so nobody has to guess whether a
+   rate is settled or a single data point. Overrides are stored per browser
+   and survive a reload; "Reset" puts a row back to the filed evidence.
+   ══════════════════════════════════════════════════════════════════════ */
+var RATE_OVERRIDES = {};
+var RATE_STORE_KEY = 'omega.rateCard.v1';
+
+/* Which RATE_CARD entries are editable, in the order a person reads them.
+   `why` is the evidence, not marketing: it is what a reviewer would be told
+   if they asked where the number came from. */
+var RATE_FIELDS = [
+  { sec:'Per linear foot \u2014 civil' },
+  { k:'trenchPaved',    label:'Trench \u2014 continuously paved', unit:'per LF',
+    why:'Sawcut, excavate, bedding, backfill, compaction and hot-mix patch. '
+       +'Identical on all five filed jobs.' },
+  { k:'trenchTurf',     label:'Trench \u2014 non-continuously paved', unit:'per LF',
+    why:'Turf and ground cover: strip, excavate, backfill, reinstate. '
+       +'ONE filed job carries this \u2014 treat it as a starting point.' },
+  { sec:'Per linear foot \u2014 conduit' },
+  { k:'conduitCableUG', label:'Conduit & cable \u2014 underground', unit:'per LF',
+    why:'Pipe, conductors, fittings and terminations, priced per foot of run '
+       +'including risers and slack. Identical on all five filed jobs.' },
+  { k:'conduitCableAG', label:'Conduit & cable \u2014 above ground', unit:'per LF',
+    why:'Material is per foot. LABOUR IS NOT: it is a setup cost plus a small '
+       +'per-foot amount, set separately below.', matOnly:true },
+  { sec:'Each' },
+  { k:'bollard',        label:'Protective bollard', unit:'each',
+    why:'Concrete-filled pipe, core footing, set, prime and paint. '
+       +'Identical on all five filed jobs.' },
+  { k:'concreteBase',   label:'Concrete EVSE base', unit:'each',
+    why:'Form and pour, anchor bolts, conduit stub-ups. One per dual-port '
+       +'pedestal on four filed jobs.' },
+  { k:'xfmrPad',        label:'Utility transformer pad', unit:'each',
+    why:"3'x5' pad, stub-ups and grounding. All three new-service jobs "
+       +'carry one; neither existing-service job does.' },
+  { sec:'Per port' },
+  { k:'charger',        label:'EVSE hardware', unit:'per port',
+    why:'Identical on all five filed jobs. Override this when the price book '
+       +'differs from the unit actually quoted.' },
+  { k:'install',        label:'EVSE installation labour', unit:'per port',
+    why:'Set, mount, terminate and commission. Identical on all five.' },
+  { k:'network',        label:'Networking', unit:'per port',
+    why:'Also the figure on the National Grid MUD incentive chart.' },
+  { sec:'Above-ground labour \u2014 setup plus per foot' },
+  { k:'_agBase',        label:'Above ground \u2014 labour setup', unit:'per run', labOnly:true,
+    why:'Risers, standoffs and terminations at both ends. Solving a+b\u00d7ft on the '
+       +'filed jobs gives this exactly at 240, 325 and 390 LF \u2014 but it means a '
+       +'short interior stub still carries the full setup. Lower it for jobs '
+       +'that are mostly short runs.' },
+  { k:'_agPerFt',       label:'Above ground \u2014 labour per foot', unit:'per LF', labOnly:true,
+    why:'The per-foot part of the same formula.' },
+  { sec:'Future proofing' },
+  { k:'fpPanelPosition',label:'Panel position held for future EVSE', unit:'each',
+    why:'Breaker space, bus and terminations. No charger, no networking. '
+       +'One filed job.' },
+  { k:'_fpStall',       label:'Extra ditch per future stall', unit:'feet', plain:true,
+    why:'Future proofing extends the ditch a parking space or two past the last '
+       +'live stall \u2014 the 112 Willow baseline shows 10 LF of future-proofing '
+       +'trench against 156 LF of live trench.' },
+  { sec:'Job-level' },
+  { k:'_design',        label:'Design & engineering', unit:'per port', labOnly:true,
+    why:'Within $15 of the filed figure on two of three National Grid jobs.' },
+  { k:'_freightBase',   label:'Freight \u2014 mobilisation', unit:'per site', labOnly:true,
+    why:'Freight = mobilisation + per port. Exact at 4, 6 and 10 ports on the '
+       +'filed jobs ($650 / $850 / $1,250).' },
+  { k:'_freightPort',   label:'Freight \u2014 per port', unit:'per port', labOnly:true,
+    why:'The per-port part of the same formula.' },
+  { k:'_permitPct',     label:'Permitting', unit:'% of eligible cost', pct:true, plain:true,
+    why:'Three percent of every eligible cost except permitting itself.' }
+];
+
+/* The synthetic keys above map onto values that do not sit in a
+   {mat,lab} pair, so they are read and written through here. */
+function rateGet(k, which){
+  var o=RATE_CARD;
+  switch(k){
+    case '_agBase':      return o.conduitCableAG.labBase;
+    case '_agPerFt':     return o.conduitCableAG.labPerFt;
+    case '_fpStall':     return o.fpStallWidthFt;
+    case '_design':      return 1000;
+    case '_freightBase': return 250;
+    case '_freightPort': return 100;
+    case '_permitPct':   return PERMIT_PCT*100;
+    default: return o[k] ? num(o[k][which]) : 0;
+  }
+}
+function rateSet(k, which, v){
+  v=num(v);
+  var o=RATE_CARD;
+  switch(k){
+    case '_agBase':      o.conduitCableAG.labBase=v; return;
+    case '_agPerFt':     o.conduitCableAG.labPerFt=v; return;
+    case '_fpStall':     o.fpStallWidthFt=v; return;
+    case '_design':      RATE_CARD._designPerPort=v; return;
+    case '_freightBase': RATE_CARD._freightBase=v; return;
+    case '_freightPort': RATE_CARD._freightPort=v; return;
+    case '_permitPct':   PERMIT_PCT=v/100; return;
+    default: if(o[k]) o[k][which]=v;
+  }
+}
+function rateDefaults(){
+  if(!RATE_CARD._defaults){
+    RATE_CARD._defaults={};
+    for(var i=0;i<RATE_FIELDS.length;i++){
+      var f=RATE_FIELDS[i]; if(!f.k) continue;
+      RATE_CARD._defaults[f.k]={ mat:rateGet(f.k,'mat'), lab:rateGet(f.k,'lab') };
+    }
+  }
+  return RATE_CARD._defaults;
+}
+function setRate(k, which, v){
+  rateDefaults();
+  rateSet(k, which, v);
+  if(!RATE_OVERRIDES[k]) RATE_OVERRIDES[k]={};
+  RATE_OVERRIDES[k][which]=num(v);
+  try{ localStorage.setItem(RATE_STORE_KEY, JSON.stringify(RATE_OVERRIDES)); }catch(e){}
+  render();
+}
+function resetRate(k){
+  var d=rateDefaults()[k]; if(!d) return;
+  rateSet(k,'mat',d.mat); rateSet(k,'lab',d.lab);
+  delete RATE_OVERRIDES[k];
+  try{ localStorage.setItem(RATE_STORE_KEY, JSON.stringify(RATE_OVERRIDES)); }catch(e){}
+  render();
+}
+function resetAllRates(){
+  var d=rateDefaults(), k;
+  for(k in d) if(d.hasOwnProperty(k)){ rateSet(k,'mat',d[k].mat); rateSet(k,'lab',d[k].lab); }
+  RATE_OVERRIDES={};
+  try{ localStorage.removeItem(RATE_STORE_KEY); }catch(e){}
+  render();
+}
+function loadRateOverrides(){
+  rateDefaults();
+  var raw=null;
+  try{ raw=localStorage.getItem(RATE_STORE_KEY); }catch(e){}
+  if(!raw) return;
+  try{
+    var o=JSON.parse(raw), k, w;
+    for(k in o) if(o.hasOwnProperty(k)){
+      for(w in o[k]) if(o[k].hasOwnProperty(w)) rateSet(k,w,o[k][w]);
+      RATE_OVERRIDES[k]=o[k];
+    }
+  }catch(e){}
+}
+window.setRate=setRate; window.resetRate=resetRate; window.resetAllRates=resetAllRates;
+
+function renderRateSettings(){
+  var host=document.getElementById('rateSettings');
+  if(!host) return;
+  var n=0, k;
+  for(k in RATE_OVERRIDES) if(RATE_OVERRIDES.hasOwnProperty(k)) n++;
+
+  var h='<div class="note" style="margin-bottom:10px">'
+    + 'Every price on every sheet is built from these rates \u00d7 what the site map '
+    + 'measures. Change one and the preview and all exports follow. '
+    + '<b>Jobs</b> is how many of the five filed submissions carry that figure \u2014 '
+    + '<b>5 of 5</b> is settled, <b>1 of 5</b> is a starting point.'
+    + (n ? ' <b>'+n+' rate'+(n===1?'':'s')+' overridden.</b>' : '')
+    + '</div>';
+
+  if(n) h+='<button class="btn sm" onclick="resetAllRates()" style="margin-bottom:10px">'
+         + 'Reset all to the filed evidence</button>';
+
+  h+='<table class="pv" style="font-size:11px"><tr>'
+    +'<th style="text-align:left">Rate</th><th>Material</th><th>Labour</th>'
+    +'<th>Unit</th><th>Jobs</th><th></th></tr>';
+
+  for(var i=0;i<RATE_FIELDS.length;i++){
+    var f=RATE_FIELDS[i];
+    if(f.sec){
+      h+='<tr><td colspan="6" style="background:var(--line2);font-weight:700;'
+        +'font-size:10px;letter-spacing:.4px">'+esc(f.sec)+'</td></tr>';
+      continue;
+    }
+    var src=RATE_CARD[f.k], jobs=src && src.n ? src.n+' of 5' : '\u2014';
+    var over=!!RATE_OVERRIDES[f.k];
+    function cell(which, show){
+      if(!show) return '<td style="text-align:center;opacity:.35">\u2014</td>';
+      return '<td><input class="cell-in mono" type="number" step="0.01" style="width:82px"'
+        +' value="'+rateGet(f.k,which)+'"'
+        +' onchange="setRate(\''+f.k+'\',\''+which+'\',this.value)"></td>';
+    }
+    var showMat = !f.labOnly && !f.plain && !f.pct;
+    var showLab = !f.matOnly;
+    if(f.plain || f.pct){ showMat=false; showLab=true; }
+    h+='<tr'+(over?' style="background:rgba(255,193,7,.10)"':'')+'>'
+      +'<td><div style="font-weight:600">'+esc(f.label)+(over?' <span style="color:#b8860b">\u25cf</span>':'')+'</div>'
+      +'<div class="o" style="font-size:9px;line-height:1.35;opacity:.75">'+esc(f.why)+'</div></td>'
+      + cell('mat', showMat) + cell('lab', showLab)
+      +'<td style="text-align:center;white-space:nowrap">'+esc(f.unit)+'</td>'
+      +'<td style="text-align:center;white-space:nowrap;font-size:10px">'+jobs+'</td>'
+      +'<td style="text-align:center">'
+      +(over?'<button class="btn sm" onclick="resetRate(\''+f.k+'\')">Reset</button>':'')
+      +'</td></tr>';
+  }
+  h+='</table>';
+  h+='<div class="note" style="margin-top:10px;font-size:10px">'
+    +'Source: five filed Eversource MA submissions, 4\u201310 ports, 2026. '
+    +'Overrides are saved in this browser only \u2014 they do not travel with an export.'
+    +'</div>';
+  host.innerHTML=h;
+}
+
 function renderPicker(){
   var h='', i, f;
   h+='<div class="chk"><input type="checkbox" id="pk-proposal"'+(PICK.proposal?' checked':'')
@@ -3680,7 +3904,7 @@ function fieldHTML(f, tight){
 function shortLabel(l){ return String(l).replace(/^#\s*of\s*/i,'# ').replace(/^Total Feet of\s*/i,'Feet — '); }
 
 /* ── 12. RENDER — mapping + previews ──────────────────────────────── */
-function render(){ syncCivil(); syncPermit(); renderMap(); renderOutputs(); }
+function render(){ syncCivil(); syncPermit(); renderRateSettings(); renderMap(); renderOutputs(); }
 
 function renderMap(){
   var BL=activeBlocks();
