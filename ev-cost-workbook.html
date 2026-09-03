@@ -7259,18 +7259,40 @@ var ALLOWED_HOSTS = (window.OMEGA_INTERNAL_HOSTS && window.OMEGA_INTERNAL_HOSTS.
   : ['tools.csebuilders.com', 'alpha.clearskyomega.com'];
 var DEV_HOSTS = ['localhost','127.0.0.1',''];   /* '' covers file:// */
 
+/* Every domain comparison in this gate runs through here. domainOf() already
+   lowercases the address, but nothing lowercased the LIST — so a config that
+   supplied 'ConcordEnergyUSA.com' refused every user in that tenant, and the
+   card blamed their account. Same case fold the Firestore rules apply in
+   userOrg(), applied to the other half of the comparison. */
+function normDomains(list){
+  var out=[], i, d;
+  for(i=0;i<(list||[]).length;i++){
+    d=String(list[i]||'').trim().toLowerCase().replace(/^@/,'');
+    if(d && out.indexOf(d)===-1) out.push(d);
+  }
+  return out;
+}
+
 /* Email domains that count as internal staff. Same two domains the
    Firestore rules treat as isAdmin(). */
-var INTERNAL_DOMAINS = ['clearsky-usa.com','csebuilders.com'];
+var INTERNAL_DOMAINS = normDomains(['clearsky-usa.com','csebuilders.com']);
 
 /* Tenants licensed to run this tool on their own projects. Kept separate
    from INTERNAL_DOMAINS on purpose: these accounts are NOT ClearSky staff
    and must not inherit anything else that keys off "internal". Adding a
    tenant here is the whole of granting access — the sign-in wall is the
-   boundary, and it now admits this list as well. */
-var TENANT_DOMAINS = (window.OMEGA_WORKBOOK_TENANTS && window.OMEGA_WORKBOOK_TENANTS.length)
-  ? window.OMEGA_WORKBOOK_TENANTS
-  : ['concordenergyusa.com'];
+   boundary, and it now admits this list as well.
+
+   ⚠ THE CONFIG OVERRIDE NOW ADDS TO THIS LIST RATHER THAN REPLACING IT.
+   Previously a non-empty window.OMEGA_WORKBOOK_TENANTS won outright, so a
+   deployment whose config.js carried an older or misspelled list silently
+   dropped the tenant named right here — and the domain in this file became
+   dead code that read like a grant. A tenant listed in either place is
+   admitted. To REVOKE a tenant, remove it from this line; removing it from a
+   config.js alone no longer does anything. */
+var TENANT_DOMAINS = normDomains(
+  ['concordenergyusa.com'].concat(window.OMEGA_WORKBOOK_TENANTS || [])
+);
 
 var FB = {
   apiKey:            "AIzaSyABoM1lgOYUnd5ZadaoTMhYmA9cHa8Tyo0",
@@ -7302,6 +7324,19 @@ function openApp(email){
 function domainOf(email){
   var m=String(email||'').toLowerCase().split('@');
   return m.length===2 ? m[1] : '';
+}
+/* user.email is normally set, but it comes back EMPTY on a session whose
+   token predates an email change in the Firebase console — and every check in
+   this gate keys off the domain, so an empty address matches nothing and the
+   user is told their account is unlicensed. It isn't; the session is stale.
+   providerData still carries the address from the identity provider, so try
+   that before concluding anything. */
+function emailOf(user){
+  if(!user) return '';
+  if(user.email) return user.email;
+  var pd=user.providerData||[], i;
+  for(i=0;i<pd.length;i++){ if(pd[i] && pd[i].email) return pd[i].email; }
+  return '';
 }
 function isInternal(email){
   var dom=domainOf(email), i;
@@ -7373,6 +7408,36 @@ function signIn(){
 window.__gateSignIn=signIn;
 window.__gateSignOut=function(){ auth.signOut(); };
 
+/* Decide on a user we have already tried to refresh. Split out so the
+   refresh path below and the ordinary path share one set of outcomes. */
+function decide(user){
+  var email = emailOf(user);
+
+  /* NO ADDRESS AT ALL — not a licensing outcome, and must not be reported as
+     one. The old card rendered '<b></b> is not on an account licensed for
+     this tool', naming nobody, and sent the customer to ask for access they
+     already had. Signing out and back in mints a fresh token with the
+     address on it. */
+  if(!email){
+    show('Session needs refreshing',
+         'You are signed in, but this session is carrying no email address — '
+       + 'which happens after an account address is changed. Sign out and sign '
+       + 'in again to refresh it. If it repeats, tell dev@clearsky-usa.com.',
+         '<button class="btn p" onclick="window.__gateSignOut()">Sign out and start over</button>');
+    return;
+  }
+
+  if(!mayUse(email)){
+    show('No access',
+         '<b>'+email+'</b> is not on an account licensed for this tool. '
+       + 'If you need access, contact dev@clearsky-usa.com.',
+         '<button class="btn" onclick="window.__gateSignOut()">Sign in as someone else</button>');
+    return;
+  }
+
+  openApp(email);
+}
+
 auth.onAuthStateChanged(function(user){
   if(!user){
     show('Sign in required',
@@ -7380,14 +7445,22 @@ auth.onAuthStateChanged(function(user){
          '<button class="btn p" onclick="window.__gateSignIn()">Sign in with Google</button>');
     return;
   }
-  if(!mayUse(user.email)){
-    show('No access',
-         '<b>'+String(user.email||'')+'</b> is not on an account licensed for this tool. '
-       + 'If you need access, contact dev@clearsky-usa.com.',
-         '<button class="btn" onclick="window.__gateSignOut()">Sign in as someone else</button>');
+
+  /* One forced round-trip before refusing anybody, but ONLY when the address
+     is missing — a stale token is the one case a refresh fixes, and making
+     every sign-in wait on a network call to solve a rare fault is a bad
+     trade. reload() re-reads the account record; getIdToken(true) discards
+     the cached claims. Either alone has been seen to return the old blank. */
+  if(!emailOf(user) && user.reload && user.getIdToken){
+    show('Checking access…', 'One moment.');
+    user.reload()
+      .then(function(){ return user.getIdToken(true); })
+      ['catch'](function(){ /* offline or revoked — decide() reports it */ })
+      .then(function(){ decide(auth.currentUser || user); });
     return;
   }
-  openApp(user.email);
+
+  decide(user);
 });
 
 })();
